@@ -1,0 +1,9 @@
+fastapi>=0.142
+uvicorn[standard]>=0.54
+pydantic>=2.11
+sentence-transformers>=5.1
+transformers>=4.48
+sentencepiece>=0.2
+protobuf>=5.29
+huggingface_hub>=0.34
+numpy>=2.1

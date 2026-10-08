@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/* On-prem: không tải web font từ internet – dùng font hệ thống có sẵn chữ Nhật */
+@theme {
+  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI",
+    "Yu Gothic", Meiryo, system-ui, sans-serif;
+  --font-serif: "Hiragino Mincho ProN", "Noto Serif JP", "Noto Serif CJK JP", "Yu Mincho", serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-ai: var(--ai); /* 藍 indigo – Dense / accent chính */
+  --color-ai-soft: var(--ai-soft);
+  --color-shu: var(--shu); /* 朱 vermilion – Graph */
+  --color-shu-soft: var(--shu-soft);
+  --color-kin: var(--kin); /* 準用 */
+  --color-ok: var(--ok);
+  --color-bad: var(--bad);
+}
+
+:root {
+  --paper: #f6f4ef;
+  --surface: #ffffff;
+  --surface-2: #efece5;
+  --ink: #1d1c1a;
+  --muted: #6a665e;
+  --line: #e2ddd2;
+  --ai: #2b4c7e;
+  --ai-soft: #e3e9f3;
+  --shu: #b8432c;
+  --shu-soft: #f6e4df;
+  --kin: #9a6b12;
+  --ok: #2f7a4f;
+  --bad: #b3261e;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #141519;
+    --surface: #1c1e23;
+    --surface-2: #24272d;
+    --ink: #ebe8e1;
+    --muted: #a19d94;
+    --line: #2f3239;
+    --ai: #8fb0e3;
+    --ai-soft: #22324a;
+    --shu: #ee8d76;
+    --shu-soft: #3d2620;
+    --kin: #d9ab52;
+    --ok: #6cc292;
+    --bad: #f08a80;
+    color-scheme: dark;
+  }
+}
+
+html,
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Văn bản điều luật: giữ xuống dòng, khoảng cách dòng thoáng cho chữ Nhật */
+.law-text {
+  font-family: var(--font-serif);
+  white-space: pre-wrap;
+  line-height: 1.95;
+  letter-spacing: 0.02em;
+  font-feature-settings: "palt" 0;
+}
+
+.answer-text {
+  white-space: pre-wrap;
+  line-height: 1.9;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ai);
+  outline-offset: 2px;
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+.caret::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--ai);
+  animation: caret 1s steps(1) infinite;
+}

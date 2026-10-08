@@ -1,0 +1,201 @@
+# JP Legal GraphRAG – on-prem stack
+#   docker compose up -d --build                      (CPU)
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build   (GPU cho model-server)
+# Chỉ cổng của web (Nginx) được mở ra ngoài; các service khác nằm trong network nội bộ.
+
+name: jplegal
+
+x-backend-env: &backend-env
+  DATA_DIR: /data
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-jplegal}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-jplegal}
+  REDIS_URL: redis://redis:6379/0
+  QDRANT_URL: http://qdrant:6333
+  QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+  NEO4J_URI: bolt://neo4j:7687
+  NEO4J_USER: neo4j
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+  MODEL_SERVER_URL: http://model-server:8080
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_API_BASE: ${LLM_API_BASE:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  EGOV_API_BASE: ${EGOV_API_BASE:-https://laws.e-gov.go.jp/api/2}
+  EGOV_BULK_URL: ${EGOV_BULK_URL:-https://laws.e-gov.go.jp/bulkdownload}
+  EGOV_MIN_INTERVAL_SEC: ${EGOV_MIN_INTERVAL_SEC:-1.0}
+  ENABLE_DAILY_UPDATE: ${ENABLE_DAILY_UPDATE:-false}
+  # retrieval tuning
+  DENSE_TOP_K: ${DENSE_TOP_K:-20}
+  SEED_K: ${SEED_K:-5}
+  GRAPH_MAX: ${GRAPH_MAX:-10}
+  GRAPH_SLOTS: ${GRAPH_SLOTS:-2}
+  FUSION_MODE: ${FUSION_MODE:-slots}
+  RERANK_ENABLED: ${RERANK_ENABLED:-true}
+  RERANK_TOP_N: ${RERANK_TOP_N:-20}
+  RERANK_MAX_CHARS: ${RERANK_MAX_CHARS:-3000}
+  FINAL_K: ${FINAL_K:-6}
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  NO_PROXY: postgres,redis,qdrant,neo4j,model-server,api,localhost,127.0.0.1,${NO_PROXY:-}
+
+x-backend-build-args: &backend-build-args
+  PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+  UV_IMAGE: ${UV_IMAGE:-ghcr.io/astral-sh/uv:0.9}
+  UV_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+
+x-backend-depends: &backend-depends
+  postgres: { condition: service_healthy }
+  redis: { condition: service_healthy }
+  qdrant: { condition: service_healthy }
+  neo4j: { condition: service_healthy }
+  model-server: { condition: service_healthy }
+
+services:
+  # ---------------------------------------------------------------- frontend
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.30-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+    image: ${IMAGE_PREFIX:-jplegal}/web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: api:8000
+      CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-60m}
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8080}:80"
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [internal]
+
+  # ---------------------------------------------------------------- backend
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
+      args: *backend-build-args
+    image: ${IMAGE_PREFIX:-jplegal}/api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment: *backend-env
+    volumes:
+      - app_data:/data
+      - ./data/import:/data/import:ro   # chép zip XML一括 vào ./data/import trên host
+    depends_on: *backend-depends
+    networks: [internal]
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+      args: *backend-build-args
+    image: ${IMAGE_PREFIX:-jplegal}/worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment: *backend-env
+    volumes:
+      - app_data:/data
+      - ./data/import:/data/import:ro   # chép zip XML一括 vào ./data/import trên host
+    depends_on: *backend-depends
+    networks: [internal]
+
+  model-server:
+    build:
+      context: ./services/model-server
+      dockerfile: Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        PRELOAD_MODELS: ${PRELOAD_MODELS:-false}
+    image: ${IMAGE_PREFIX:-jplegal}/model-server:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      MODEL_DEVICE: ${MODEL_DEVICE:-}          # trống = tự chọn cuda nếu có
+      MAX_SEQ_LENGTH: ${MAX_SEQ_LENGTH:-2048}
+      USE_FP16: ${USE_FP16:-auto}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}     # 1 = air-gapped, chỉ đọc model trong volume
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+    volumes:
+      - models:/models
+    networks: [internal]
+
+  # ---------------------------------------------------------------- data stores
+  qdrant:
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.19.2}
+    restart: unless-stopped
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+
+  neo4j:
+    image: ${NEO4J_IMAGE:-neo4j:5.26-community}
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP:-1G}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-1G}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-1G}
+      NEO4J_dbms_usage__report_enabled: "false"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks: [internal]
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jplegal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-jplegal}
+      TZ: Asia/Tokyo
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:8.2}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  app_data:
+  models:
+  qdrant_data:
+  neo4j_data:
+  neo4j_logs:
+  pg_data:
+  redis_data:

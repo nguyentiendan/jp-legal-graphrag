@@ -1,0 +1,15 @@
+# Dev override: mở cổng các service ra 127.0.0.1 để debug (Neo4j Browser, Qdrant UI, psql, API docs)
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+services:
+  api:
+    ports: ["127.0.0.1:8000:8000"]
+  model-server:
+    ports: ["127.0.0.1:8081:8080"]
+  qdrant:
+    ports: ["127.0.0.1:6333:6333"]
+  neo4j:
+    ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]
+  redis:
+    ports: ["127.0.0.1:6379:6379"]

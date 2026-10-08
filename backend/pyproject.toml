@@ -1,0 +1,52 @@
+[project]
+name = "jplegal"
+version = "0.1.0"
+description = "GraphRAG (Dense + Graph) cho văn bản pháp luật Nhật Bản – backend API, worker, ingest pipeline"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.142",
+  "uvicorn[standard]>=0.54",
+  "python-multipart>=0.0.32",
+  "sse-starlette>=3.5",
+  "pydantic>=2.11",
+  "pydantic-settings>=2.15",
+  "httpx>=0.28",
+  "qdrant-client>=1.19",
+  "neo4j>=6.4",
+  "sqlalchemy[asyncio]>=2.1",
+  "asyncpg>=0.32",
+  "arq>=0.28",
+  "redis>=5.2",
+  "litellm>=1.104",
+  "lxml>=6.1",
+  "pymupdf>=1.28",
+  "python-docx>=1.2",
+  "typer>=0.27",
+  "pyyaml>=6.0",
+  "numpy>=2.1",
+]
+
+[project.scripts]
+jplegal = "jplegal.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8.4", "pytest-asyncio>=1.2", "ruff>=0.14"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jplegal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+ignore = ["E501", "B008", "B905", "RUF001", "RUF002", "RUF003", "RUF005", "RUF007", "RUF012"]  # FastAPI/typer Depends-style defaults; ký tự toàn角 tiếng Nhật

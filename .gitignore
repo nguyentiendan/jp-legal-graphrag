@@ -1,0 +1,12 @@
+.env
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/node_modules/
+web/.next/
+web/out/
+data/*
+!data/import/
+data/import/*
+!data/import/.gitkeep
+*.tar

@@ -1,0 +1,20 @@
+# Danh sách luật nạp mặc định (P0 – lĩnh vực 労働).
+# Dùng: docker compose exec api jplegal ingest-egov --file /app/config/laws.yaml
+# law_id tra tại https://laws.e-gov.go.jp/ (URL của luật chứa law_id).
+laws:
+  - law_id: 322AC0000000049
+    title: 労働基準法
+  - law_id: 322M40000100023
+    title: 労働基準法施行規則
+  - law_id: 419AC0000000128
+    title: 労働契約法
+  - law_id: 347AC0000000057
+    title: 労働安全衛生法
+  - law_id: 334AC0000000137
+    title: 最低賃金法
+  - law_id: 403AC0000000076
+    title: 育児休業、介護休業等育児又は家族介護を行う労働者の福祉に関する法律
+  - law_id: 347AC0000000113
+    title: 雇用の分野における男女の均等な機会及び待遇の確保等に関する法律
+  - law_id: 405AC0000000076
+    title: 短時間労働者及び有期雇用労働者の雇用管理の改善等に関する法律

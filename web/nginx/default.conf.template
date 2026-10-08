@@ -1,0 +1,70 @@
+# Render bởi entrypoint của image nginx (envsubst): ${API_UPSTREAM}, ${CLIENT_MAX_BODY_SIZE}
+upstream jplegal_api {
+    server ${API_UPSTREAM};
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    server_tokens off;
+    client_max_body_size ${CLIENT_MAX_BODY_SIZE};
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "same-origin" always;
+
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+    # Lưu ý: không dùng add_header trong location để header bảo mật ở trên được kế thừa.
+
+    # --- API (FastAPI) --------------------------------------------------
+    location /api/ {
+        proxy_pass http://jplegal_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_request_buffering off;   # upload file lớn đi thẳng tới API
+    }
+
+    # SSE /api/ask: tắt buffering để token được stream ngay
+    location = /api/ask {
+        proxy_pass http://jplegal_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        proxy_read_timeout 600s;
+    }
+
+    # --- Static (Next.js export) -----------------------------------------
+    location /_next/static/ {
+        expires max;   # file có hash trong tên
+        try_files $uri =404;
+    }
+
+    location / {
+        expires -1;    # HTML luôn revalidate
+        try_files $uri $uri.html $uri/ /index.html;
+    }
+
+    location = /nginx-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+}
