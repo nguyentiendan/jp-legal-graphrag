@@ -62,13 +62,25 @@ Hoặc dùng màn hình **Nạp dữ liệu**: upload file (XML e-Gov / PDF / DO
 
 ## LLM
 
-Câu trả lời được sinh qua LiteLLM nên đổi model chỉ bằng biến môi trường (`LLM_MODEL`, `LLM_API_BASE`, `LLM_API_KEY`). Để trống `LLM_MODEL` thì hệ thống vẫn chạy retrieval và trả về các điều luật căn cứ. Ví dụ vLLM nội bộ:
+Câu trả lời được sinh qua LiteLLM nên đổi model chỉ bằng biến môi trường (`LLM_MODEL`, `LLM_API_BASE`, `LLM_API_KEY`). Để trống `LLM_MODEL` thì hệ thống vẫn chạy retrieval và trả về các điều luật căn cứ.
+
+vLLM **không** nằm trong `docker-compose.yml` – chạy riêng (cùng máy hoặc máy GPU khác), ví dụ:
+
+```bash
+docker run -d --name vllm --gpus all -p 8001:8000 --ipc=host \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  vllm/vllm-openai:latest --model Qwen/Qwen3-32B --reasoning-parser qwen3 --api-key my-secret
+```
+
+Rồi trong `.env`:
 
 ```
-LLM_MODEL=openai/Qwen/Qwen3-32B-Instruct
-LLM_API_BASE=http://10.0.0.20:8000/v1
-LLM_API_KEY=dummy
+LLM_MODEL=hosted_vllm/Qwen/Qwen3-32B
+LLM_API_BASE=http://host.docker.internal:8001/v1   # vLLM cùng máy; máy khác thì dùng IP
+LLM_API_KEY=my-secret
 ```
+
+`docker compose up -d api worker` để áp dụng. `/api/status` trả `"llm": {"ok": true}` nghĩa là đã cấu hình; hỏi thử 1 câu trên UI để kiểm tra kết nối thật tới vLLM.
 
 ## Môi trường không có internet (air-gapped)
 

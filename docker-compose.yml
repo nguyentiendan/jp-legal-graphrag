@@ -79,6 +79,8 @@ services:
     image: ${IMAGE_PREFIX:-jplegal}/api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment: *backend-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # gọi vLLM/Ollama chạy trên chính máy host
     volumes:
       - app_data:/data
       - ./data/import:/data/import:ro   # chép zip XML一括 vào ./data/import trên host
@@ -93,6 +95,8 @@ services:
     image: ${IMAGE_PREFIX:-jplegal}/worker:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment: *backend-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # gọi vLLM/Ollama chạy trên chính máy host
     volumes:
       - app_data:/data
       - ./data/import:/data/import:ro   # chép zip XML一括 vào ./data/import trên host
