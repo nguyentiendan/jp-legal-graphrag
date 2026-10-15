@@ -1,0 +1,41 @@
+# Production override cho EC2: chỉ pull image đã build sẵn từ registry (GHCR), không build trên server.
+#   docker compose --env-file .env --env-file .env.deploy \
+#     -f docker-compose.yml [-f docker-compose.gpu.yml] -f docker-compose.prod.yml up -d --no-build
+# .env.deploy do deploy/remote-deploy.sh sinh ra: IMAGE_PREFIX=ghcr.io/<owner>/jplegal, IMAGE_TAG=<git sha>
+# Cần Docker Compose >= 2.24.4 (hỗ trợ !reset).
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  web:
+    build: !reset null
+    pull_policy: missing
+    logging: *logging
+  api:
+    build: !reset null
+    pull_policy: missing
+    logging: *logging
+  worker:
+    build: !reset null
+    pull_policy: missing
+    logging: *logging
+  model-server:
+    build: !reset null
+    pull_policy: missing
+    logging: *logging
+  ollama:
+    logging: *logging
+  ollama-pull:
+    logging: *logging
+  qdrant:
+    logging: *logging
+  neo4j:
+    logging: *logging
+  postgres:
+    logging: *logging
+  redis:
+    logging: *logging

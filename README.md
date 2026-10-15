@@ -187,3 +187,7 @@ cd web && npm ci && NEXT_PUBLIC_API_BASE=http://localhost:8000 npm run dev
 ```
 
 Khi chạy `npm run dev` với API ở origin khác, đặt `CORS_ORIGINS=http://localhost:3000` cho api.
+
+## CI/CD & deploy EC2
+
+GitHub Actions (CI cho PR, build image lên GHCR và deploy Docker Compose lên EC2): xem [docs/02-ci-cd-github-actions-ec2.md](docs/02-ci-cd-github-actions-ec2.md).
