@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - "**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+  workflow_call:          # deploy-ec2.yml gọi lại workflow này trước khi build/deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install deps
+        run: uv sync --frozen --group dev
+      - name: Ruff lint
+        run: uv run --frozen ruff check .
+      - name: Ruff format check
+        run: uv run --frozen ruff format --check . || echo "::warning::ruff format chưa sạch (không chặn CI)"
+      - name: Pytest
+        run: uv run --frozen pytest -q
+
+  web:
+    name: Web (tsc + next build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run lint
+      - name: Build (static export)
+        run: npm run build
+
+  compose:
+    name: Validate docker compose
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: compose config (dev / gpu / prod)
+        run: |
+          cp .env.example .env
+          printf 'IMAGE_PREFIX=ghcr.io/example/jplegal\nIMAGE_TAG=ci\n' > .env.deploy
+          docker compose config -q
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml config -q
+          docker compose --env-file .env --env-file .env.deploy \
+            -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.prod.yml config -q
+      - name: shellcheck deploy scripts
+        run: shellcheck -S warning deploy/*.sh
+
+  docker-build:
+    name: Docker build (${{ matrix.name }})
+    # chỉ build thử trên PR; khi deploy, deploy-ec2.yml tự build + push
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            context: backend
+            dockerfile: backend/Dockerfile.api
+          - name: worker
+            context: backend
+            dockerfile: backend/Dockerfile.worker
+          - name: web
+            context: web
+            dockerfile: web/Dockerfile
+          - name: model-server
+            context: services/model-server
+            dockerfile: services/model-server/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}-linux/amd64
