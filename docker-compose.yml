@@ -1,6 +1,8 @@
 # JP Legal GraphRAG – on-prem stack
 #   docker compose up -d --build                      (CPU)
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build   (GPU cho model-server)
+# LLM mặc định: service "ollama" bên dưới (LLM_API_BASE=http://ollama:11434). Không dùng thì:
+#   docker compose up -d --scale ollama=0 --scale ollama-pull=0   (hoặc make up-no-ollama)
 # Chỉ cổng của web (Nginx) được mở ra ngoài; các service khác nằm trong network nội bộ.
 
 name: jplegal
@@ -19,6 +21,8 @@ x-backend-env: &backend-env
   LLM_MODEL: ${LLM_MODEL:-}
   LLM_API_BASE: ${LLM_API_BASE:-}
   LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_TIMEOUT: ${LLM_TIMEOUT:-300}
+  LLM_NUM_CTX: ${LLM_NUM_CTX:-16384}
   EGOV_API_BASE: ${EGOV_API_BASE:-https://laws.e-gov.go.jp/api/2}
   EGOV_BULK_URL: ${EGOV_BULK_URL:-https://laws.e-gov.go.jp/bulkdownload}
   EGOV_MIN_INTERVAL_SEC: ${EGOV_MIN_INTERVAL_SEC:-1.0}
@@ -35,7 +39,7 @@ x-backend-env: &backend-env
   FINAL_K: ${FINAL_K:-6}
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
-  NO_PROXY: postgres,redis,qdrant,neo4j,model-server,api,localhost,127.0.0.1,${NO_PROXY:-}
+  NO_PROXY: postgres,redis,qdrant,neo4j,model-server,ollama,api,localhost,127.0.0.1,${NO_PROXY:-}
 
 x-backend-build-args: &backend-build-args
   PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
@@ -126,6 +130,43 @@ services:
       - models:/models
     networks: [internal]
 
+  # ---------------------------------------------------------------- LLM (Ollama)
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.4}
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434            # chỉ trong network nội bộ, không publish ra host
+      OLLAMA_CONTEXT_LENGTH: ${LLM_NUM_CTX:-16384}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [internal]
+
+  # Job chạy 1 lần: tải model OLLAMA_MODEL nếu chưa có trong volume (air-gapped: bỏ qua nếu đã có sẵn)
+  ollama-pull:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.4}
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command: ['ollama show "$$OLLAMA_MODEL" >/dev/null 2>&1 && echo "model $$OLLAMA_MODEL đã có" || ollama pull "$$OLLAMA_MODEL"']
+    depends_on:
+      ollama: { condition: service_healthy }
+    networks: [internal]
+
   # ---------------------------------------------------------------- data stores
   qdrant:
     image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.19.2}
@@ -197,6 +238,7 @@ networks:
 
 volumes:
   app_data:
+  ollama_models:
   models:
   qdrant_data:
   neo4j_data:

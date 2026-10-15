@@ -1,4 +1,4 @@
-# GPU override cho model-server (cần NVIDIA Container Toolkit trên host)
+# GPU override cho model-server và ollama (cần NVIDIA Container Toolkit trên host)
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 services:
   model-server:
@@ -9,6 +9,15 @@ services:
       MODEL_DEVICE: cuda
       USE_FP16: "true"
       MAX_SEQ_LENGTH: ${MAX_SEQ_LENGTH:-8192}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${GPU_COUNT:-1}
+              capabilities: [gpu]
+
+  ollama:
     deploy:
       resources:
         reservations:

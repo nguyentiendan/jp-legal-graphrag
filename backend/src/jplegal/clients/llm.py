@@ -33,6 +33,8 @@ class LLMClient:
             kw["api_base"] = self.s.llm_api_base
         if self.s.llm_api_key:
             kw["api_key"] = self.s.llm_api_key
+        if self.s.llm_num_ctx and self.s.llm_model.startswith("ollama"):
+            kw["num_ctx"] = self.s.llm_num_ctx  # LiteLLM chuyển vào options.num_ctx của Ollama
         return kw
 
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:

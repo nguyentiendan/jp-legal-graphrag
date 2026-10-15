@@ -50,7 +50,9 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_temperature: float = 0.0
     llm_max_tokens: int = 1500
-    llm_timeout: float = 120.0
+    llm_timeout: float = 300.0
+    # Ollama mặc định chỉ dùng context 2048 token → prompt (6 điều luật) bị cắt. 0 = không gửi.
+    llm_num_ctx: int = 16384
 
     # ---- e-Gov 法令API ----
     egov_api_base: str = "https://laws.e-gov.go.jp/api/2"

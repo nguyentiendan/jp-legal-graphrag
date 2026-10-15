@@ -10,3 +10,4 @@ data/*
 data/import/*
 !data/import/.gitkeep
 *.tar
+*.tgz

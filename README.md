@@ -12,12 +12,11 @@ Tài liệu kiến trúc: [docs/01-tech-stack-va-kien-truc.md](docs/01-tech-stac
                                                       │  enqueue (Redis / arq)
                                                       ▼
                                                    worker (ingest)
-             ┌──────────────┬───────────────┬─────────┴────┬──────────────┐
-             ▼              ▼               ▼              ▼              ▼
-       model-server      qdrant           neo4j        postgres         redis
-   (Ruri v3 embed+rerank) (vector)      (graph)   (metadata, job, refs) (queue, rate limit)
-                                                      │
-                                       LLM nội bộ (vLLM / Ollama) qua LiteLLM – tuỳ chọn
+        ┌─────────────┬──────────────┬────────┴─────┬──────────────┬──────────────┐
+        ▼             ▼              ▼              ▼              ▼              ▼
+  model-server      ollama         qdrant         neo4j        postgres         redis
+ (Ruri v3 embed  (LLM sinh câu   (vector)        (graph)    (metadata, job,  (queue, rate
+   + rerank)     trả lời, LiteLLM)                            refs)           limit)
 ```
 
 | Service | Dockerfile | Cổng nội bộ | Ghi chú |
@@ -26,6 +25,7 @@ Tài liệu kiến trúc: [docs/01-tech-stack-va-kien-truc.md](docs/01-tech-stac
 | api | `backend/Dockerfile.api` | 8000 | FastAPI, docs tại `/api/docs` |
 | worker | `backend/Dockerfile.worker` | – | arq worker: upload, e-Gov API, bulk XML, rebuild links |
 | model-server | `services/model-server/Dockerfile` | 8080 | `/v1/embeddings`, `/v1/rerank`; CPU mặc định, GPU qua override |
+| ollama | image `ollama/ollama:0.40.4` | 11434 | LLM sinh câu trả lời; job `ollama-pull` tự tải `OLLAMA_MODEL` lần đầu |
 | qdrant | image `qdrant/qdrant:v1.19.2` | 6333 | |
 | neo4j | image `neo4j:5.26-community` | 7687 | |
 | postgres | image `postgres:17` | 5432 | |
@@ -44,6 +44,7 @@ docker compose up -d --build   # CPU
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 
 docker compose ps              # chờ tất cả healthy (model-server tải model lần đầu ~1–3 phút)
+docker compose logs -f ollama-pull   # Ollama tải OLLAMA_MODEL lần đầu (llama3.2 ~2 GB), xong thì job tự thoát
 ```
 
 Mở `http://<server>:8080`.
@@ -64,7 +65,25 @@ Hoặc dùng màn hình **Nạp dữ liệu**: upload file (XML e-Gov / PDF / DO
 
 Câu trả lời được sinh qua LiteLLM nên đổi model chỉ bằng biến môi trường (`LLM_MODEL`, `LLM_API_BASE`, `LLM_API_KEY`). Để trống `LLM_MODEL` thì hệ thống vẫn chạy retrieval và trả về các điều luật căn cứ.
 
-vLLM **không** nằm trong `docker-compose.yml` – chạy riêng (cùng máy hoặc máy GPU khác), ví dụ:
+### Mặc định: Ollama trong docker compose
+
+```
+OLLAMA_MODEL=llama3.2               # model job ollama-pull sẽ tải
+LLM_MODEL=ollama_chat/llama3.2      # "ollama_chat/" + cùng tên
+LLM_API_BASE=http://ollama:11434    # tên service, KHÔNG dùng localhost
+LLM_NUM_CTX=16384                   # Ollama mặc định chỉ 2048 token → prompt bị cắt
+```
+
+- Đổi model: sửa `OLLAMA_MODEL` và `LLM_MODEL` cho khớp, rồi `docker compose up -d` (job `ollama-pull` tự tải model mới). Hoặc tải tay: `make ollama-pull MODEL=qwen2.5:7b`, xem danh sách: `make ollama-list`.
+- `llama3.2` (3B) nhẹ nhưng tiếng Nhật pháp lý yếu; nên thử `qwen2.5:7b` / `qwen2.5:14b` nếu đủ RAM/VRAM.
+- GPU: `make up-gpu` cấp GPU NVIDIA cho cả model-server và ollama. **Docker Desktop trên macOS không cho container dùng GPU** → trên Mac, Ollama trong Docker chạy CPU và chậm; muốn nhanh thì dùng app Ollama native (xem dưới).
+- Ollama chỉ nằm trong network nội bộ, không mở cổng ra ngoài (Ollama không có xác thực). Debug từ host: `make up-dev` → `127.0.0.1:11434`.
+
+### Dùng LLM bên ngoài (vLLM, Ollama native, cloud)
+
+Chạy `make up-no-ollama` để không khởi động service ollama, rồi đổi 3 biến `LLM_*`.
+
+vLLM chạy riêng (cùng máy hoặc máy GPU khác), ví dụ:
 
 ```bash
 docker run -d --name vllm --gpus all -p 8001:8000 --ipc=host \
@@ -72,15 +91,15 @@ docker run -d --name vllm --gpus all -p 8001:8000 --ipc=host \
   vllm/vllm-openai:latest --model Qwen/Qwen3-32B --reasoning-parser qwen3 --api-key my-secret
 ```
 
-Rồi trong `.env`:
-
 ```
 LLM_MODEL=hosted_vllm/Qwen/Qwen3-32B
 LLM_API_BASE=http://host.docker.internal:8001/v1   # vLLM cùng máy; máy khác thì dùng IP
 LLM_API_KEY=my-secret
 ```
 
-`docker compose up -d api worker` để áp dụng. `/api/status` trả `"llm": {"ok": true}` nghĩa là đã cấu hình; hỏi thử 1 câu trên UI để kiểm tra kết nối thật tới vLLM.
+Ollama native trên host: `LLM_API_BASE=http://host.docker.internal:11434`, và trên Linux cần cho Ollama nghe ngoài loopback (`OLLAMA_HOST=0.0.0.0:11434`).
+
+Sau khi sửa `.env`: `docker compose up -d api worker` (lệnh `restart` không đọc lại `.env`). `/api/status` trả `"llm": {"ok": true}` chỉ nghĩa là đã cấu hình; hỏi thử 1 câu trên UI để kiểm tra kết nối thật.
 
 ## Môi trường không có internet (air-gapped)
 
@@ -89,8 +108,9 @@ Trên một máy có internet:
 ```bash
 # 1. Build image, nhúng sẵn model Ruri v3 vào image model-server
 PRELOAD_MODELS=true docker compose build
-docker compose pull qdrant neo4j postgres redis
+docker compose pull qdrant neo4j postgres redis ollama
 make save-images                       # → jplegal-images.tar
+make up && make ollama-export          # tải OLLAMA_MODEL rồi đóng gói → ollama_models.tgz
 
 # 2. Dữ liệu luật: tải zip từ https://laws.e-gov.go.jp/bulkdownload/ (XML toàn bộ ~285 MB)
 ```
@@ -100,6 +120,7 @@ Trên server on-prem:
 ```bash
 make load-images
 echo "HF_HUB_OFFLINE=1" >> .env
+make ollama-import                     # nạp ollama_models.tgz vào volume (trước khi up)
 docker compose up -d                   # không cần --build
 cp all.zip ./data/import/all.zip       # thư mục này được mount read-only vào api/worker tại /data/import
 make bulk ZIP=/data/import/all.zip     # hoặc dùng tab "XML một lần (bulk)" trên UI
@@ -120,7 +141,9 @@ Dữ liệu luật lấy từ e-Gov法令検索 (デジタル庁) theo [公共�
 | Lệnh | Việc |
 |---|---|
 | `make up` / `make up-gpu` / `make up-dev` | chạy stack |
-| `make logs` | log api, worker, model-server |
+| `make up-no-ollama` | chạy stack, không chạy Ollama (dùng LLM ngoài) |
+| `make ollama-pull MODEL=...` / `make ollama-list` | tải / xem model Ollama |
+| `make logs` | log api, worker, model-server, ollama |
 | `make seed` | nạp bộ luật mẫu từ e-Gov |
 | `make bulk ZIP=...` | nạp từ zip XML |
 | `make eval` | đo Recall@k / MRR@10 / nDCG@10 cho 3 cấu hình (dense, dense+graph, dense+graph+rerank) |
