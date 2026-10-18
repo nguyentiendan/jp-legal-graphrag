@@ -28,12 +28,13 @@ class QueryRequest(BaseModel):
     law_ids: list[str] | None = None
     use_graph: bool = True
     use_rerank: bool = True
+    use_sparse: bool | None = None  # None = theo SPARSE_ENABLED
     top_k: int | None = Field(None, ge=1, le=30)
 
 
 def _opts(b: QueryRequest) -> RetrievalOptions:
-    return RetrievalOptions(use_graph=b.use_graph, use_rerank=b.use_rerank, law_ids=b.law_ids or None,
-                            final_k=b.top_k)
+    return RetrievalOptions(use_graph=b.use_graph, use_rerank=b.use_rerank, use_sparse=b.use_sparse,
+                            law_ids=b.law_ids or None, final_k=b.top_k)
 
 
 @router.post("/search")

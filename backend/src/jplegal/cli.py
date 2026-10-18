@@ -136,36 +136,71 @@ def rebuild_links_cmd() -> None:
     _run(main())
 
 
+@app.command("reindex-sparse")
+def reindex_sparse_cmd() -> None:
+    """Tính (lại) BM25 sparse vector cho mọi chunk trong Qdrant – không cần tải lại luật hay embed lại.
+
+    Collection tạo từ bản P0 (chưa có sparse vector) được tự chuyển sang schema mới.
+    Chạy lại khi đổi SUDACHI_DICT / BM25_K1 / BM25_B / BM25_AVG_LEN.
+    """
+
+    async def main():
+        c = await _container()
+
+        async def progress(pct: int, msg: str) -> None:
+            typer.echo(f"[{pct:>3}%] {msg}")
+
+        typer.echo(json.dumps(await c.qdrant.reindex_sparse(c.sparse_doc, progress=progress), ensure_ascii=False))
+        await c.close()
+
+    _run(main())
+
+
 @app.command()
-def search(query: str, no_graph: bool = False, no_rerank: bool = False, k: int = 6) -> None:
+def search(query: str, no_graph: bool = False, no_rerank: bool = False, k: int = 6,
+           stage: str = typer.Option(None, help="dense | sparse | hybrid (mặc định theo SPARSE_ENABLED)")) -> None:
     async def main():
         from jplegal.retrieval.pipeline import RetrievalOptions, Retriever
 
         c = await _container()
-        res = await Retriever(c).retrieve(query, RetrievalOptions(use_graph=not no_graph,
-                                                                  use_rerank=not no_rerank, final_k=k))
+        res = await Retriever(c).retrieve(query, RetrievalOptions(use_graph=not no_graph, use_rerank=not no_rerank,
+                                                                  final_k=k, first_stage=stage))
         for i, it in enumerate(res.items, 1):
             typer.echo(f"{i:>2}. {it.citation}{it.caption}  src={'+'.join(it.sources)} "
-                       f"rrf={it.rrf_score:.4f} rerank={it.rerank_score}")
-        typer.echo(f"timings: {res.timings_ms}")
+                       f"dense#{it.dense_rank} bm25#{it.sparse_rank} rerank={it.rerank_score}")
+        typer.echo(f"first_stage={res.first_stage} timings: {res.timings_ms}")
         await c.close()
 
     _run(main())
 
 
 @app.command("eval")
-def eval_cmd(queries: Path = typer.Option(Path("/app/eval/queries.jsonl")), out: Path | None = None) -> None:
-    """So sánh Dense vs Dense+Graph vs Dense+Graph+Rerank (Recall@k, MRR@10, nDCG@10)."""
-    from jplegal.retrieval.evaluate import run_eval
+def eval_cmd(queries: Path = typer.Option(Path("/app/eval/queries.jsonl")), out: Path | None = None,
+             configs: str | None = typer.Option(None, help="danh sách cấu hình, phân tách bằng dấu phẩy"),
+             no_rerank: bool = typer.Option(False, "--no-rerank", help="bỏ các cấu hình có rerank (nhanh trên CPU)"),
+             summary: bool = typer.Option(False, "--summary", help="chỉ in bảng tổng hợp")) -> None:
+    """So sánh các cấu hình retrieval (Recall@1/5/10, MRR@10, nDCG@10, All@10)."""
+    from jplegal.retrieval.evaluate import CONFIGS, run_eval
+
+    names = [x.strip() for x in configs.split(",")] if configs else list(CONFIGS)
+    if no_rerank:
+        names = [n for n in names if "rerank" not in n]
 
     async def main():
         c = await _container()
-        report = await run_eval(c, queries)
+        report = await run_eval(c, queries, names)
         await c.close()
         text = json.dumps(report, ensure_ascii=False, indent=2)
-        typer.echo(text)
         if out:
             out.write_text(text, encoding="utf-8")
+        if not summary:
+            typer.echo(text)
+            return
+        metrics = ["recall@1", "recall@5", "recall@10", "mrr@10", "ndcg@10", "all@10"]
+        typer.echo(f"{queries.name} ({report['n_queries']} câu)")
+        typer.echo(f"{'config':28s}" + "".join(f"{m:>10s}" for m in metrics))
+        for name, m in report["configs"].items():
+            typer.echo(f"{name:28s}" + "".join(f"{m[k]:>10.3f}" for k in metrics))
 
     _run(main())
 

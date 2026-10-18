@@ -50,8 +50,12 @@ async def ingest_parsed_law(c, parsed: ParsedLaw, progress: Progress = _noop, *,
 
     await progress(72, "Ghi Qdrant")
     await c.qdrant.delete_law(meta.law_id)
+    sparse = None
+    if await c.qdrant.has_sparse():  # luôn tính BM25 khi collection hỗ trợ (bật/tắt nhánh sparse lúc truy vấn)
+        sparse = [c.sparse_doc({"law_title": ch.law_title, "article_title": ch.article_title,
+                                "caption": ch.caption, "text": ch.text}) for ch in chunks]
     await c.qdrant.upsert_chunks(chunks, vectors, extra={"law_type": meta.law_type, "source": meta.source,
-                                                          "revision_id": meta.revision_id})
+                                                          "revision_id": meta.revision_id}, sparse=sparse)
 
     await progress(80, "Ghi Neo4j")
     aliases, refs = extract_references(parsed)

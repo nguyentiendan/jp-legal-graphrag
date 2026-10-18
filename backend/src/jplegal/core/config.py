@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     final_k: int = 6
     rerank_max_chars: int = 3000
 
+    # ---- Sparse / BM25 (Sudachi) ----
+    sparse_enabled: bool = True  # nhánh BM25; cần collection có sparse vector (jplegal reindex-sparse)
+    sudachi_dict: str = "core"  # core | full (cần cài sudachidict-full)
+    bm25_k1: float = 1.2
+    bm25_b: float = 0.75
+    bm25_avg_len: float = 100.0  # số token trung bình / chunk (đo trên corpus 労働 ≈ 100); đổi → reindex-sparse
+    hybrid_fusion: str = "dbsf"  # dbsf | rrf  (fusion dense + sparse trong Qdrant; DBSF tốt hơn trên bộ eval)
+    hybrid_w_dense: float = 1.0  # trọng số RRF (chỉ dùng khi fusion = rrf)
+    hybrid_w_sparse: float = 1.0
+    hybrid_rrf_k: int = 60
+
     @property
     def raw_dir(self) -> Path:
         return self.data_dir / "raw"

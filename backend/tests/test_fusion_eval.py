@@ -23,3 +23,5 @@ def test_slot_fusion():
     assert out[:4] == ["a", "b", "x", "y"]  # graph chỉ bổ sung điều mới, dense giữ đầu danh sách
     assert out[4:] == ["c", "d", "e"]
     assert [u for u, _ in slot_fusion(["a"], [], 3, 2)] == ["a"]
+    # điều first stage xếp hạng thấp (ngoài top final_k) được graph kéo lên, không bị nhân đôi
+    assert [u for u, _ in slot_fusion(["a", "b", "c", "d", "e"], ["e"], final_k=3, slots=1)] == ["a", "b", "e", "c", "d"]

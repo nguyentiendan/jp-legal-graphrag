@@ -1,8 +1,8 @@
-# JP Legal GraphRAG (P0)
+# JP Legal GraphRAG (P1)
 
-GraphRAG cho văn bản pháp luật Nhật Bản: **Dense search (Qdrant) + Graph (Neo4j)**, embedding/rerank bằng **Ruri v3** (`cl-nagoya/ruri-v3-310m`, `cl-nagoya/ruri-v3-reranker-310m`), frontend **Next.js** (static export) chạy trên **Nginx**. Thiết kế cho môi trường **on-prem**: mỗi service có Dockerfile riêng, `docker-compose.yml` gọi các service đó.
+GraphRAG cho văn bản pháp luật Nhật Bản: **Dense + BM25 (Qdrant hybrid) + Graph (Neo4j)**, embedding/rerank bằng **Ruri v3** (`cl-nagoya/ruri-v3-310m`, `cl-nagoya/ruri-v3-reranker-310m`), frontend **Next.js** (static export) chạy trên **Nginx**. Thiết kế cho môi trường **on-prem**: mỗi service có Dockerfile riêng, `docker-compose.yml` gọi các service đó.
 
-Tài liệu kiến trúc: [docs/01-tech-stack-va-kien-truc.md](docs/01-tech-stack-va-kien-truc.md).
+Tài liệu kiến trúc: `docs/01-tech-stack-va-kien-truc.md`.
 
 ## Kiến trúc container
 
@@ -56,6 +56,35 @@ make seed        # = docker compose exec api jplegal ingest-egov --file /app/con
 ```
 
 Hoặc dùng màn hình **Nạp dữ liệu**: upload file (XML e-Gov / PDF / DOCX / TXT), nhập `law_id`, hay nạp từ zip XML一括ダウンロード. Theo dõi ở **Tiến trình**.
+
+## Truy xuất: Dense + BM25 + Graph
+
+```
+Câu hỏi ─┬─► Dense  (Ruri v3)          ─┐ 1 request Qdrant: 2 prefetch
+         └─► BM25   (Sudachi, sparse)  ─┘ + fusion DBSF (HYBRID_FUSION)  ─► seed ─► Graph (Neo4j) ─► Rerank ─► LLM
+```
+
+- **BM25** = công thức chấm điểm theo từ khoá. Sudachi (`sudachipy` + `sudachidict-core`) tách từ tiếng Nhật trong api/worker; mỗi chunk lưu thêm sparse vector `bm25` cạnh vector `dense` trong cùng point Qdrant, IDF do Qdrant tính (`modifier: idf`). Không thêm service mới.
+- Tách từ: chuẩn hoá số kanji trước 条/項/号… (`第三十七条` → `第37条`, nên hỏi "37条" vẫn khớp), lấy cả từ ghép (割増賃金) lẫn từ đơn (割増, 賃金), dùng `normalized_form` (36協定 → 三六協定).
+- Bật/tắt: `SPARSE_ENABLED` (mặc định bật) hoặc ô **Từ khoá (BM25)** trên UI. Nhãn nguồn của mỗi điều: Dense / BM25 / Graph.
+- **Nâng cấp từ bản cũ** (collection chưa có sparse vector): `make reindex-sparse` – tính BM25 cho dữ liệu đã có (không tải lại e-Gov, không embed lại). Lệnh này tự chuyển collection sang schema mới; trong lúc chạy không nên ingest. Khi đổi `BM25_K1`, `BM25_B`, `BM25_AVG_LEN`, `SUDACHI_DICT` cũng chạy lại lệnh này.
+
+Kết quả đo (`make eval`, 6 luật lĩnh vực 労働, `RERANK_TOP_N=10`, `RERANK_MAX_CHARS=800` trên CPU):
+
+| Cấu hình | 20 câu 1 điều: R@10 | MRR@10 | All@10 | 38 câu multi-hop: R@10 | MRR@10 | All@10 |
+|---|---|---|---|---|---|---|
+| dense | 0.933 | 0.892 | 0.900 | 0.816 | 0.834 | 0.658 |
+| bm25 | 0.933 | 0.789 | 0.900 | 0.750 | 0.838 | 0.526 |
+| hybrid (RRF) | 0.983 | 0.882 | 0.950 | 0.842 | 0.864 | 0.711 |
+| hybrid (DBSF) | 0.983 | 0.907 | 0.950 | 0.842 | 0.876 | 0.711 |
+| dense + graph | 0.950 | 0.892 | 0.950 | 0.803 | 0.834 | 0.632 |
+| hybrid (DBSF) + graph | **1.000** | 0.907 | **1.000** | 0.882 | 0.876 | 0.789 |
+| dense + rerank | 0.933 | 0.925 | 0.900 | 0.816 | **0.890** | 0.658 |
+| dense + graph + rerank | 0.933 | 0.925 | 0.900 | 0.882 | 0.864 | 0.789 |
+| hybrid (RRF) + graph + rerank | 0.983 | **0.975** | 0.950 | 0.908 | 0.858 | 0.842 |
+| **hybrid (DBSF) + graph + rerank** (mặc định) | 0.983 | **0.975** | 0.950 | **0.921** | 0.858 | **0.868** |
+
+All@10 = tỉ lệ câu hỏi tìm đủ tất cả điều cần trong top-10. Bộ eval còn nhỏ (58 câu): chênh lệch 0.026 ở multi-hop ≈ 1 câu. Câu còn sót chủ yếu cần 法12条 (平均賃金) – đây là dẫn chiếu qua *thuật ngữ* chứ không phải "第◯条", sẽ xử lý ở P2 (定義語).
 
 ## Hiệu năng (CPU vs GPU)
 
@@ -146,7 +175,9 @@ Dữ liệu luật lấy từ e-Gov法令検索 (デジタル庁) theo [公共�
 | `make logs` | log api, worker, model-server, ollama |
 | `make seed` | nạp bộ luật mẫu từ e-Gov |
 | `make bulk ZIP=...` | nạp từ zip XML |
-| `make eval` | đo Recall@k / MRR@10 / nDCG@10 cho 3 cấu hình (dense, dense+graph, dense+graph+rerank) |
+| `make eval` / `make eval-quick` | đo Recall@k / MRR@10 / nDCG@10 / All@10 cho các cấu hình (dense, bm25, hybrid, +graph, +rerank) trên 2 bộ câu hỏi; `eval-quick` bỏ rerank |
+| `make reindex-sparse` | tính BM25 cho dữ liệu đã nạp (nâng cấp từ bản cũ, hoặc sau khi đổi `BM25_*`) |
+| `docker compose exec api jplegal search "36協定" --stage sparse` | thử 1 nhánh: `dense` / `sparse` / `hybrid` |
 | `docker compose exec api jplegal search "残業代の割増率"` | thử truy xuất từ CLI |
 | `docker compose exec api jplegal rebuild-links` | dựng lại cạnh graph sau khi nạp thêm luật |
 | `make test` | unit test backend |
@@ -160,12 +191,13 @@ backend/                 Python 3.12 (uv) – package jplegal
     api/                 FastAPI routes (/api/ingest, /api/jobs, /api/laws, /api/search, /api/ask SSE)
     worker/              arq tasks
     ingest/              parser XML e-Gov / PDF / DOCX, chunker, trích dẫn chiếu, linker
-    retrieval/           dense + graph expansion → weighted RRF → rerank → LLM
+    retrieval/           dense + BM25 (Sudachi, Qdrant hybrid) + graph expansion → slots → rerank → LLM
     stores/              Qdrant, Neo4j
     clients/             e-Gov API (rate limit), model-server, LiteLLM
     db/                  SQLAlchemy models (PostgreSQL)
   config/laws.yaml       danh sách luật mẫu
-  eval/queries.jsonl     bộ câu hỏi đánh giá
+  eval/queries.jsonl     20 câu "1 điều trả lời được"
+  eval/queries_multihop.jsonl  38 câu cần 2–3 điều (luật + 施行規則/政令 được uỷ quyền)
   prompts/answer_ja.txt  prompt sinh câu trả lời
   tests/
 services/model-server/   FastAPI + sentence-transformers (Ruri v3)
@@ -187,3 +219,7 @@ cd web && npm ci && NEXT_PUBLIC_API_BASE=http://localhost:8000 npm run dev
 ```
 
 Khi chạy `npm run dev` với API ở origin khác, đặt `CORS_ORIGINS=http://localhost:3000` cho api.
+
+## CI/CD & deploy EC2
+
+GitHub Actions (CI cho PR, build image lên GHCR và deploy Docker Compose lên EC2): xem [docs/02-ci-cd-github-actions-ec2.md](docs/02-ci-cd-github-actions-ec2.md).

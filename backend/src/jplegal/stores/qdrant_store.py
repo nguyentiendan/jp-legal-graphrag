@@ -1,20 +1,31 @@
-"""Qdrant – lưu vector chunk (dense 768-d, cosine) + payload để filter.
+"""Qdrant – mỗi chunk = 1 point gồm 2 named vector:
+    dense  : Ruri v3 768-d, cosine
+    bm25   : sparse vector (Sudachi + trọng số tf BM25), modifier=IDF → Qdrant tự tính IDF
++ payload để filter. Point id = uuid5(chunk_uid). Payload chứa article_uid (khoá chung với Neo4j / PostgreSQL).
 
-Point id = uuid5(chunk_uid). Payload chứa article_uid (khoá chung với Neo4j / PostgreSQL).
-Phase 1: thêm sparse vector "bm25" (token Sudachi) vào cùng collection.
+Hybrid search (dense + sparse) chạy trong 1 request: 2 prefetch + fusion RRF / DBSF của Qdrant.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from qdrant_client import AsyncQdrantClient, models
 
 from jplegal.core.models import Chunk
 
+if TYPE_CHECKING:
+    from jplegal.retrieval.sparse import SparseVec
+
 _NS = uuid.UUID("6f1c2a7e-2f3b-4c55-9a43-6a1d6c0c9f10")
 DENSE = "dense"
+SPARSE = "bm25"
+log = logging.getLogger(__name__)
+PAYLOAD_INDEXES = ("law_id", "article_uid", "law_type", "source")
 
 
 def point_id(chunk_uid: str) -> str:
@@ -35,18 +46,34 @@ class QdrantStore:
         self.client = client or AsyncQdrantClient(url=url, api_key=api_key or None, timeout=60)
         self.collection = collection
         self.dim = dim
+        self._has_sparse: bool | None = None
 
     async def close(self) -> None:
         await self.client.close()
 
+    async def _create(self, name: str) -> None:
+        await self.client.create_collection(
+            name,
+            vectors_config={DENSE: models.VectorParams(size=self.dim, distance=models.Distance.COSINE)},
+            sparse_vectors_config={SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)},
+        )
+        for field in PAYLOAD_INDEXES:
+            await self.client.create_payload_index(name, field, models.PayloadSchemaType.KEYWORD)
+
     async def ensure_collection(self) -> None:
         if not await self.client.collection_exists(self.collection):
-            await self.client.create_collection(
-                self.collection,
-                vectors_config={DENSE: models.VectorParams(size=self.dim, distance=models.Distance.COSINE)},
-            )
-            for field in ("law_id", "article_uid", "law_type", "source"):
-                await self.client.create_payload_index(self.collection, field, models.PayloadSchemaType.KEYWORD)
+            await self._create(self.collection)
+        self._has_sparse = None
+
+    async def has_sparse(self) -> bool:
+        """Collection đã có sparse vector "bm25" chưa (collection tạo từ P0 thì chưa → cần reindex-sparse)."""
+        if getattr(self, "_has_sparse", None) is None:
+            try:
+                info = await self.client.get_collection(self.collection)
+                self._has_sparse = SPARSE in (info.config.params.sparse_vectors or {})
+            except Exception:  # collection chưa tồn tại
+                return False
+        return bool(self._has_sparse)
 
     async def delete_law(self, law_id: str) -> None:
         await self.client.delete(
@@ -56,12 +83,20 @@ class QdrantStore:
         )
 
     async def upsert_chunks(self, chunks: list[Chunk], vectors: list[list[float]], extra: dict | None = None,
-                            batch: int = 128) -> None:
+                            batch: int = 128, sparse: list[SparseVec] | None = None) -> None:
         extra = extra or {}
+        use_sparse = sparse is not None and await self.has_sparse()
+
+        def vec(i: int, v: list[float]) -> dict:
+            out: dict = {DENSE: v}
+            if use_sparse and sparse[i]:  # type: ignore[index]
+                out[SPARSE] = models.SparseVector(indices=sparse[i].indices, values=sparse[i].values)  # type: ignore[index]
+            return out
+
         points = [
             models.PointStruct(
                 id=point_id(c.chunk_uid),
-                vector={DENSE: v},
+                vector=vec(i, v),
                 payload={
                     "chunk_uid": c.chunk_uid,
                     "article_uid": c.article_uid,
@@ -76,7 +111,7 @@ class QdrantStore:
                     **extra,
                 },
             )
-            for c, v in zip(chunks, vectors, strict=True)
+            for i, (c, v) in enumerate(zip(chunks, vectors, strict=True))
         ]
         for i in range(0, len(points), batch):
             await self.client.upsert(self.collection, points=points[i : i + batch], wait=True)
@@ -86,11 +121,103 @@ class QdrantStore:
         res = await self.client.query_points(
             self.collection, query=vector, using=DENSE, limit=limit, query_filter=flt, with_payload=True,
         )
-        return [
-            DenseHit(article_uid=p.payload["article_uid"], chunk_uid=p.payload["chunk_uid"], score=p.score,
-                     payload=p.payload)
-            for p in res.points
+        return _hits(res.points)
+
+    async def search_sparse(self, svec: SparseVec, limit: int, law_ids: list[str] | None = None) -> list[DenseHit]:
+        if not svec:
+            return []
+        flt = _match("law_id", law_ids) if law_ids else None
+        res = await self.client.query_points(
+            self.collection, query=models.SparseVector(indices=svec.indices, values=svec.values), using=SPARSE,
+            limit=limit, query_filter=flt, with_payload=True,
+        )
+        return _hits(res.points)
+
+    async def search_hybrid(self, vector: list[float], svec: SparseVec, limit: int, law_ids: list[str] | None = None,
+                            fusion: str = "rrf", prefetch_limit: int | None = None, rrf_k: int = 60,
+                            weights: tuple[float, float] | None = None) -> list[DenseHit]:
+        """Dense + sparse trong 1 request: 2 prefetch → fusion (rrf | dbsf) của Qdrant."""
+        if not svec:
+            return await self.search(vector, limit, law_ids)
+        flt = _match("law_id", law_ids) if law_ids else None
+        pl = prefetch_limit or limit
+        prefetch = [
+            models.Prefetch(query=vector, using=DENSE, limit=pl, filter=flt),
+            models.Prefetch(query=models.SparseVector(indices=svec.indices, values=svec.values), using=SPARSE,
+                            limit=pl, filter=flt),
         ]
+        if fusion == "dbsf":
+            q: models.Query = models.FusionQuery(fusion=models.Fusion.DBSF)
+        elif weights and weights != (1.0, 1.0):
+            q = models.RrfQuery(rrf=models.Rrf(k=rrf_k, weights=list(weights)))
+        else:
+            q = models.RrfQuery(rrf=models.Rrf(k=rrf_k))
+        res = await self.client.query_points(self.collection, prefetch=prefetch, query=q, limit=limit,
+                                             with_payload=True)
+        return _hits(res.points)
+
+    # ------------------------------------------------------------------ sparse maintenance
+    async def reindex_sparse(self, encode: Callable[[dict], SparseVec], batch: int = 256,
+                             progress: Callable[[int, str], Awaitable[None]] | None = None) -> dict:
+        """Tính lại sparse vector cho toàn bộ point.
+
+        Collection cũ (P0, chưa có "bm25") → tạo collection tạm có cả dense + sparse, chép dense + payload sang,
+        xoá collection cũ, tạo lại với schema mới và chép về (Qdrant không thêm named vector vào collection có sẵn).
+        """
+        migrated = False
+        if not await self.has_sparse():
+            await self._migrate_schema(progress)
+            migrated = True
+        total = (await self.client.count(self.collection, exact=True)).count
+        done, offset = 0, None
+        while True:
+            pts, offset = await self.client.scroll(self.collection, limit=batch, offset=offset, with_payload=True,
+                                                   with_vectors=False)
+            if not pts:
+                break
+            upd = []
+            for p in pts:
+                sv = encode(p.payload or {})
+                upd.append(models.PointVectors(
+                    id=p.id, vector={SPARSE: models.SparseVector(indices=sv.indices, values=sv.values)}))
+            await self.client.update_vectors(self.collection, points=upd, wait=True)
+            done += len(pts)
+            if progress:
+                await progress(int(100 * done / max(1, total)), f"BM25 {done}/{total}")
+            if offset is None:
+                break
+        return {"points": done, "migrated": migrated}
+
+    async def _migrate_schema(self, progress) -> None:
+        tmp = f"{self.collection}__migrate"
+        log.warning("Qdrant: collection %s chưa có sparse vector – chuyển sang schema mới (qua %s)", self.collection, tmp)
+        if await self.client.collection_exists(tmp):
+            await self.client.delete_collection(tmp)
+        await self._create(tmp)
+        await self._copy(self.collection, tmp, progress, "chép sang collection tạm")
+        await self.client.delete_collection(self.collection)
+        await self._create(self.collection)
+        await self._copy(tmp, self.collection, progress, "chép về collection mới")
+        await self.client.delete_collection(tmp)
+        self._has_sparse = True
+
+    async def _copy(self, src: str, dst: str, progress, label: str, batch: int = 256) -> None:
+        offset, n = None, 0
+        while True:
+            pts, offset = await self.client.scroll(src, limit=batch, offset=offset, with_payload=True,
+                                                   with_vectors=True)
+            if not pts:
+                break
+            out = []
+            for p in pts:
+                v = p.vector if isinstance(p.vector, dict) else {DENSE: p.vector}
+                out.append(models.PointStruct(id=p.id, vector=dict(v), payload=p.payload))
+            await self.client.upsert(dst, points=out, wait=True)
+            n += len(pts)
+            if progress:
+                await progress(0, f"{label}: {n}")
+            if offset is None:
+                break
 
     async def vectors_for_articles(self, article_uids: list[str]) -> dict[str, list[list[float]]]:
         """Lấy vector của mọi chunk thuộc các article (để chấm cosine cho node mở rộng từ graph)."""
@@ -112,6 +239,14 @@ class QdrantStore:
 
     async def count(self) -> int:
         return (await self.client.count(self.collection, exact=False)).count
+
+
+def _hits(points) -> list[DenseHit]:
+    return [
+        DenseHit(article_uid=p.payload["article_uid"], chunk_uid=p.payload["chunk_uid"], score=p.score,
+                 payload=p.payload)
+        for p in points
+    ]
 
 
 def _match(field: str, values: list[str]) -> models.Filter:

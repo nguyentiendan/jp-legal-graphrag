@@ -54,6 +54,7 @@ function EvidenceItem({ it, n }: { it: RetrievedItem; n: number }) {
           </button>
         )}
         {it.dense_rank && <span>dense #{it.dense_rank} · {it.dense_score?.toFixed(3)}</span>}
+        {it.sparse_rank && <span>bm25 #{it.sparse_rank} · {it.sparse_score?.toFixed(2)}</span>}
         {it.graph_rank && (
           <span>
             graph #{it.graph_rank}
@@ -77,6 +78,7 @@ export default function AskPage() {
   const [query, setQuery] = useState("");
   const [useGraph, setUseGraph] = useState(true);
   const [useRerank, setUseRerank] = useState(true);
+  const [useSparse, setUseSparse] = useState(true);
   const [laws, setLaws] = useState<Law[] | null>(null);
   const [lawFilter, setLawFilter] = useState<string[]>([]);
   const [retrieval, setRetrieval] = useState<RetrievalResult | null>(null);
@@ -98,7 +100,7 @@ export default function AskPage() {
     setAnswer("");
     setRetrieval(null);
     setPhase("retrieving");
-    const body = { query, use_graph: useGraph, use_rerank: useRerank, law_ids: lawFilter.length ? lawFilter : null };
+    const body = { query, use_graph: useGraph, use_rerank: useRerank, use_sparse: useSparse, law_ids: lawFilter.length ? lawFilter : null };
     try {
       if (searchOnly) {
         setRetrieval(await api.search(body));
@@ -148,6 +150,10 @@ export default function AskPage() {
             className="resize-y border-0 bg-transparent px-1 text-[15px] focus:border-0"
           />
           <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
+            <label className="flex items-center gap-2 text-sm text-muted">
+              <input type="checkbox" checked={useSparse} onChange={(e) => setUseSparse(e.target.checked)} />
+              {t("ask.sparse")}
+            </label>
             <label className="flex items-center gap-2 text-sm text-muted">
               <input type="checkbox" checked={useGraph} onChange={(e) => setUseGraph(e.target.checked)} />
               {t("ask.graph")}

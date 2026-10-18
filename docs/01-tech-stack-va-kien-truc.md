@@ -1,7 +1,13 @@
-# GraphRAG cho văn bản pháp luật Nhật Bản – Tech Stack & Kiến trúc (v0.3)
+# GraphRAG cho văn bản pháp luật Nhật Bản – Tech Stack & Kiến trúc (v0.4)
 
 > Mục tiêu: app 2 phần **Ingest** và **Retrieval**, retrieval = **Dense (vector) + Graph**, bắt đầu đơn giản rồi mở rộng dần.
 > Tài liệu tham chiếu: "#19 - GraphRAG - Từ văn bản tới Knowledge Graph" (Microsoft GraphRAG 3.1.1, BGE-M3, LanceDB, Graph + RRF).
+>
+> **Changelog v0.4 (2026-10-18)** – P1 bước 1–2:
+> - **Bộ eval multi-hop** `eval/queries_multihop.jsonl`: 38 câu, mỗi câu cần 2–3 điều (điều luật + điều 施行規則/政令 được uỷ quyền, hoặc điều được dẫn chiếu). Thêm metric **All@10** (tỉ lệ câu tìm đủ *tất cả* điều cần). Nạp thêm 2 luật: 割増賃金令 (`406CO0000000005`), 最低賃金法施行規則 (`334M50002000016`).
+> - **BM25 (Sudachi) trong Qdrant**: sparse vector `bm25` (IDF do Qdrant tính) cạnh vector `dense`; hybrid = 1 request Qdrant (2 prefetch + fusion **DBSF**, RRF để so sánh). Không thêm service. `make reindex-sparse` để nâng cấp dữ liệu cũ.
+> - **Sửa graph expansion**: trước đây graph chỉ bổ sung điều *chưa có trong top-20 dense*, nên điều đúng nằm hạng 11–20 không bao giờ được kéo lên. Nay chỉ loại các điều đã ở top `FINAL_K`.
+> - UI: ô bật/tắt BM25, nhãn nguồn Dense / BM25 / Graph, hiển thị hạng bm25.
 >
 > **Changelog v0.3 (2026-10-07)** – bắt đầu code P0 (`jp-legal-graphrag/`):
 > - On-prem: **mỗi service 1 Dockerfile** (`web`, `api`, `worker`, `model-server`), `docker-compose.yml` gọi các service; frontend Next.js **static export chạy trên Nginx** (Nginx proxy `/api` → FastAPI, SSE không buffer). Override GPU (`docker-compose.gpu.yml`) và dev (`docker-compose.dev.yml`).
@@ -159,27 +165,30 @@ Cả hai đều dùng **cùng 1 pipeline trong worker**, chỉ khác bước *so
 client.create_collection(
     "articles",
     vectors_config={"dense": VectorParams(size=768, distance=Distance.COSINE)},
-    # phase 1: sparse_vectors_config={"bm25": SparseVectorParams(modifier=Modifier.IDF)}
+    sparse_vectors_config={"bm25": SparseVectorParams(modifier=Modifier.IDF)},  # từ v0.4
 )
+# bm25: Sudachi (core) – SplitMode C + các từ con mode A, normalized_form, giữ 名詞/動詞/形容詞/形状詞,
+#       số kanji trước 条/項/号 → số Ả Rập; index = blake2b 4 byte của token;
+#       value doc = tf·(k1+1)/(tf+k1·(1−b+b·dl/avgdl)), k1=1.2, b=0.75, avgdl=100; value query = 1.0/token
 # payload: uid, law_id, law_title, article_key, caption, revision_id, law_type, is_current, text
 # payload index: law_id, law_type, is_current
 ```
 
 ---
 
-## 6. Retrieval (MVP)
+## 6. Retrieval
 
-1. Embed query (`検索クエリ: ` + câu hỏi).
-2. **Dense (Qdrant)**: top-20 điều (gộp chunk theo article, lấy max), filter `law_id` nếu user chọn.
-3. **Graph expansion (Neo4j)**: từ top-5 seed → 1-hop `REFERS_TO` (2 chiều), `APPLIES_MUTATIS_MUTANDIS`, `DELEGATES_TO`. Chỉ giữ các điều **mà dense chưa tìm thấy**; node `Law` được uỷ quyền (施行令/施行規則) → dense search giới hạn trong luật đó. Rank ứng viên theo cosine với query, giữ ≤10.
+1. Embed query (`検索クエリ: ` + câu hỏi) và tách từ query bằng Sudachi → sparse vector.
+2. **First stage (Qdrant)**, `HYBRID_FUSION=dbsf` (mặc định): 1 request `query_points` với 2 `prefetch` (dense và bm25, mỗi nhánh top-60 chunk = `DENSE_TOP_K`×3) + `FusionQuery(DBSF)` → top-20 điều (gộp chunk theo article, lấy max), filter `law_id` nếu user chọn. Tắt BM25 (`SPARSE_ENABLED=false` / ô trên UI) hoặc collection chưa có sparse → chỉ dense. Hai nhánh cũng được chạy riêng (song song) để gắn nhãn nguồn và hạng `dense#` / `bm25#`.
+3. **Graph expansion (Neo4j)**: từ top-5 seed → 1-hop `REFERS_TO` (2 chiều), `APPLIES_MUTATIS_MUTANDIS`, `DELEGATES_TO`. Chỉ giữ các điều **chưa nằm trong top `FINAL_K`** (v0.4; trước đó là "chưa có trong top-20" nên không kéo được điều hạng 11–20 lên); node `Law` được uỷ quyền (施行令/施行規則) → dense search giới hạn trong luật đó. Rank ứng viên theo cosine với query, giữ ≤10.
 4. **Fusion**
    - Không rerank: **slots** – dense giữ đầu danh sách, graph chèn tối đa `GRAPH_SLOTS=2` điều mới vào cuối top-k.
-   - Có rerank: pool = dense top-`RERANK_TOP_N` ∪ graph candidates → `ruri-v3-reranker-310m` quyết định thứ tự → top-6.
+   - Có rerank: pool = first stage top-`RERANK_TOP_N` ∪ graph candidates → `ruri-v3-reranker-310m` quyết định thứ tự → top-6.
    - `FUSION_MODE=rrf` vẫn giữ để so sánh (weighted RRF k=60, w_dense=1.0, w_graph=0.5).
 5. **Context**: mỗi điều kèm `法令名 第◯条（見出し）`.
 6. **Generate** (LiteLLM, stream SSE): bắt buộc trích dẫn `[労働基準法 第32条]`; cho phép 「根拠が見つかりません」. Không cấu hình LLM → chỉ trả retrieval.
 
-Response: `/api/search` trả JSON; `/api/ask` stream SSE `retrieval` → `token`… → `done` (`answer`, `citations`). Mỗi item có `sources` (dense/graph), rank/score từng nhánh, `graph_via` (đi qua cạnh nào), `rerank_score`; kèm `subgraph` để FE vẽ.
+Response: `/api/search` trả JSON; `/api/ask` stream SSE `retrieval` → `token`… → `done` (`answer`, `citations`). Mỗi item có `sources` (dense/sparse/graph), rank/score từng nhánh, `graph_via` (đi qua cạnh nào), `rerank_score`; kèm `subgraph` để FE vẽ.
 
 ### 6.1 Kết quả đo P0 (20 câu hỏi `eval/queries.jsonl`, 3 luật: 労基法, 施行規則, 労契法)
 
@@ -197,6 +206,32 @@ Nhận xét:
 - Ruri v3 dense đã rất mạnh với câu hỏi "1 điều trả lời được". RRF cộng điểm khiến các điều *vừa dense hạng thấp vừa là hàng xóm graph* vượt lên trên điều đúng → bỏ RRF làm mặc định.
 - Giá trị của graph nằm ở **ngữ cảnh bổ sung** (điều được dẫn chiếu, 施行規則 được uỷ quyền) cho LLM và cho câu hỏi nhiều bước – bộ eval hiện tại chưa đo được điều này. P1 cần thêm câu hỏi multi-hop (vd. "割増賃金の計算から除外される賃金は？" → 労基法37条5項 + 施行規則21条).
 - Trên CPU, rerank là bước chậm nhất (vài chục giây cho 20 điều dài) → production nên chạy model-server trên GPU, hoặc giảm `RERANK_TOP_N` / `RERANK_MAX_CHARS`.
+
+### 6.2 Kết quả đo P1 (v0.4 – 7 luật, thêm bộ multi-hop 38 câu)
+
+Đo trên CPU, rerank với `RERANK_TOP_N=10`, `RERANK_MAX_CHARS=800`.
+
+| Cấu hình | 20 câu 1 điều: R@10 | MRR@10 | All@10 | 38 câu multi-hop: R@10 | MRR@10 | All@10 |
+|---|---|---|---|---|---|---|
+| dense | 0.933 | 0.892 | 0.900 | 0.816 | 0.834 | 0.658 |
+| bm25 | 0.933 | 0.789 | 0.900 | 0.750 | 0.838 | 0.526 |
+| hybrid (RRF) | 0.983 | 0.882 | 0.950 | 0.842 | 0.864 | 0.711 |
+| hybrid (DBSF) | 0.983 | 0.907 | 0.950 | 0.842 | 0.876 | 0.711 |
+| dense + graph | 0.950 | 0.892 | 0.950 | 0.803 | 0.834 | 0.632 |
+| hybrid (DBSF) + graph | **1.000** | 0.907 | **1.000** | 0.882 | 0.876 | 0.789 |
+| dense + rerank | 0.933 | 0.925 | 0.900 | 0.816 | **0.890** | 0.658 |
+| dense + graph + rerank | 0.933 | 0.925 | 0.900 | 0.882 | 0.864 | 0.789 |
+| hybrid (RRF) + graph + rerank | 0.983 | **0.975** | 0.950 | 0.908 | 0.858 | 0.842 |
+| **hybrid (DBSF) + graph + rerank** (mặc định) | 0.983 | **0.975** | 0.950 | **0.921** | 0.858 | **0.868** |
+
+All@10 = tỉ lệ câu hỏi tìm đủ tất cả điều cần trong top-10. Bộ eval còn nhỏ (58 câu): chênh lệch 0.026 ở multi-hop ≈ 1 câu. Câu còn sót chủ yếu cần 法12条 (平均賃金) – đây là dẫn chiếu qua *thuật ngữ* chứ không phải "第◯条", sẽ xử lý ở P2 (定義語).
+
+Nhận xét:
+- **BM25 một mình yếu hơn dense**, nhưng gộp vào (hybrid) thì tăng Recall@10 ở cả 2 bộ: BM25 bắt tốt số điều, tên 様式, thuật ngữ chính xác (36協定, 割増賃金) mà embedding hay bỏ sót.
+- **DBSF tốt hơn RRF** (MRR/All@10 bằng hoặc cao hơn) → mặc định `HYBRID_FUSION=dbsf`, đúng như khuyến nghị của [Qdrant về hybrid search](https://qdrant.tech/documentation/search/hybrid-queries/).
+- **Graph phát huy ở multi-hop**: sau khi sửa expansion, hybrid+graph+rerank đạt All@10 0.868 so với 0.658 của dense+rerank. Với dense không có BM25, graph gần như không thêm gì vì seed kém.
+- Thử `GRAPH_SLOTS` 1–4 × `SEED_K` 3/5/8: chênh nhau ≈1 câu → giữ 2 / 5 để tránh overfit bộ eval nhỏ.
+- Còn sót: 平均賃金 (法12) – dẫn chiếu qua thuật ngữ, cần P2 定義語; 高度プロフェッショナル制度 (m25) – không cấu hình nào tìm được, ứng viên cho query rewrite.
 
 ---
 
@@ -243,7 +278,7 @@ jp-legal-graphrag/
 | Phase | Nội dung |
 |---|---|
 | **P0 – MVP** (đang làm) | Ingest e-Gov API / bulk XML / upload; graph cấu trúc + dẫn chiếu + 準用 + 委任; Qdrant dense + Neo4j expand + slots/rerank; `/ask` streaming; Next.js (hỏi đáp, nạp dữ liệu, tiến trình, xem luật/điều + graph); Docker on-prem; bộ eval 20 câu |
-| **P1** | Eval multi-hop + tune graph; sparse BM25 (Sudachi) trong Qdrant làm nhánh thứ 3; query rewrite 口語 → 法律用語; tune trọng số; upload PDF/DOCX ổn định |
+| **P1** (đang làm) | ✔ Eval multi-hop (38 câu) + sửa graph expansion; ✔ sparse BM25 (Sudachi) trong Qdrant, fusion DBSF; ☐ query rewrite 口語 → 法律用語 (LLM); ☐ dẫn chiếu cấp 項・号; ☐ upload PDF/DOCX ổn định |
 | **P2** | LLM extraction có kiểm soát: 定義語 (`:Term`, `DEFINES`), 主体, khái niệm pháp lý; trang review graph |
 | **P3** | Leiden community + community report → nhánh community retrieval / global search |
 | **P4** | Versioning theo 改正/施行日, 判例/通達, auth, Langfuse, LiteLLM Proxy |

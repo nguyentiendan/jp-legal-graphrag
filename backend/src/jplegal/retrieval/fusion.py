@@ -17,15 +17,16 @@ def weighted_rrf(rankings: dict[str, list[str]], weights: dict[str, float], k: i
 
 
 def slot_fusion(dense: list[str], graph: list[str], final_k: int, slots: int) -> list[tuple[str, float]]:
-    """Dense là danh sách chính; graph chỉ bổ sung tối đa `slots` điều *mới* (không có trong dense).
+    """Dense (first stage) là danh sách chính; graph bổ sung tối đa `slots` điều chưa có trong top `final_k`
+    (điều first stage xếp hạng thấp hơn final_k cũng được kéo lên).
 
     Thứ tự: dense[: final_k - slots] → graph (mới) → phần dense còn lại.
     Score trả về là 1/rank để hiển thị (không có ý nghĩa tuyệt đối).
     Lý do: với Ruri v3, dense đã rất mạnh; RRF cộng điểm khiến các điều "vừa dense hạng thấp vừa là hàng xóm"
     vượt lên trên điều đúng (đo bằng eval/queries.jsonl). Graph đóng vai trò cung cấp ngữ cảnh liên quan.
     """
-    dense_set = set(dense)
-    new_graph = [g for g in dict.fromkeys(graph) if g not in dense_set][: max(0, slots)]
-    head = dense[: max(0, final_k - len(new_graph))]
-    order = head + new_graph + [d for d in dense if d not in head]
+    top = set(dense[:final_k])
+    new_graph = [g for g in dict.fromkeys(graph) if g not in top][: max(0, slots)]
+    head = [d for d in dense if d not in new_graph][: max(0, final_k - len(new_graph))]
+    order = head + new_graph + [d for d in dense if d not in head and d not in new_graph]
     return [(u, 1.0 / (i + 1)) for i, u in enumerate(order)]

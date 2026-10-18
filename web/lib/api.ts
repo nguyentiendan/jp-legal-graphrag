@@ -1,7 +1,7 @@
 // Client gọi FastAPI qua Nginx (/api). Khi chạy `npm run dev` có thể đặt NEXT_PUBLIC_API_BASE=http://localhost:8000
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/$/, "") + "/api";
 
-export type Source = "dense" | "graph";
+export type Source = "dense" | "sparse" | "graph";
 
 export interface RetrievedItem {
   uid: string;
@@ -16,6 +16,9 @@ export interface RetrievedItem {
   sources: Source[];
   dense_rank: number | null;
   dense_score: number | null;
+  sparse_rank: number | null;
+  sparse_score: number | null;
+  hybrid_rank: number | null;
   graph_rank: number | null;
   graph_score: number | null;
   graph_via: { from: string; rel: string; direction: string }[];
@@ -151,6 +154,7 @@ export interface AskBody {
   law_ids?: string[] | null;
   use_graph?: boolean;
   use_rerank?: boolean;
+  use_sparse?: boolean;
   top_k?: number | null;
 }
 

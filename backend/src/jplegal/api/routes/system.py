@@ -38,4 +38,7 @@ async def status(request: Request) -> dict:
     )
     out = dict(results)
     out["llm"] = {"ok": c.llm.enabled, "model": c.settings.llm_model or None}
+    has_sparse = await c.qdrant.has_sparse()
+    out["sparse"] = {"ok": has_sparse, "enabled": c.settings.sparse_enabled, "fusion": c.settings.hybrid_fusion,
+                     **({} if has_sparse else {"hint": "chạy: jplegal reindex-sparse"})}
     return out

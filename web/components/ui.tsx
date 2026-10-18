@@ -65,10 +65,10 @@ export function SourceBadge({ s }: { s: Source }) {
     <span
       className={cx(
         "inline-flex h-5 items-center rounded px-1.5 text-[11px] font-semibold tracking-wide",
-        s === "dense" ? "bg-ai-soft text-ai" : "bg-shu-soft text-shu",
+        s === "dense" ? "bg-ai-soft text-ai" : s === "sparse" ? "bg-moe-soft text-moe" : "bg-shu-soft text-shu",
       )}
     >
-      {t(s === "dense" ? "src.dense" : "src.graph")}
+      {t(s === "dense" ? "src.dense" : s === "sparse" ? "src.sparse" : "src.graph")}
     </span>
   );
 }

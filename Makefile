@@ -2,7 +2,7 @@ COMPOSE ?= docker compose
 GPU_FILES = -f docker-compose.yml -f docker-compose.gpu.yml
 DEV_FILES = -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: env build up up-gpu up-dev up-no-ollama down logs ps init seed bulk eval test save-images load-images ollama-pull ollama-list ollama-export ollama-import
+.PHONY: env build up up-gpu up-dev up-no-ollama down logs ps init seed bulk eval test save-images load-images ollama-pull ollama-list ollama-export ollama-import eval-quick reindex-sparse
 
 env:            ## tạo .env từ mẫu
 	@test -f .env || cp .env.example .env && echo ".env ready"
@@ -56,8 +56,16 @@ seed:           ## nạp bộ luật mẫu (lĩnh vực 労働) từ e-Gov API
 bulk:           ## nạp từ zip đã chép vào volume: make bulk ZIP=/data/raw/bulk/all.zip
 	$(COMPOSE) exec api jplegal ingest-bulk --zip $(ZIP)
 
-eval:           ## đo Recall/MRR/nDCG cho dense / dense+graph / +rerank
-	$(COMPOSE) exec api jplegal eval --queries /app/eval/queries.jsonl
+eval:           ## đo Recall/MRR/nDCG/All@10 cho mọi cấu hình (dense, bm25, hybrid, +graph, +rerank) trên 2 bộ câu hỏi
+	$(COMPOSE) exec api jplegal eval --queries /app/eval/queries.jsonl --summary
+	$(COMPOSE) exec api jplegal eval --queries /app/eval/queries_multihop.jsonl --summary
+
+eval-quick:     ## như eval nhưng bỏ các cấu hình rerank (nhanh trên CPU)
+	$(COMPOSE) exec api jplegal eval --queries /app/eval/queries.jsonl --summary --no-rerank
+	$(COMPOSE) exec api jplegal eval --queries /app/eval/queries_multihop.jsonl --summary --no-rerank
+
+reindex-sparse: ## tính BM25 cho dữ liệu đã có trong Qdrant (nâng cấp từ bản cũ / sau khi đổi BM25_*)
+	$(COMPOSE) exec worker jplegal reindex-sparse
 
 test:           ## unit test backend (chạy trên máy dev, cần uv)
 	cd backend && uv run --group dev pytest -q

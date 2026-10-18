@@ -37,6 +37,12 @@ x-backend-env: &backend-env
   RERANK_TOP_N: ${RERANK_TOP_N:-20}
   RERANK_MAX_CHARS: ${RERANK_MAX_CHARS:-3000}
   FINAL_K: ${FINAL_K:-6}
+  SPARSE_ENABLED: ${SPARSE_ENABLED:-true}
+  HYBRID_FUSION: ${HYBRID_FUSION:-dbsf}
+  SUDACHI_DICT: ${SUDACHI_DICT:-core}
+  BM25_K1: ${BM25_K1:-1.2}
+  BM25_B: ${BM25_B:-0.75}
+  BM25_AVG_LEN: ${BM25_AVG_LEN:-100}
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
   NO_PROXY: postgres,redis,qdrant,neo4j,model-server,ollama,api,localhost,127.0.0.1,${NO_PROXY:-}

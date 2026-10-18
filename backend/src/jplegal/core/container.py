@@ -50,6 +50,21 @@ class Container:
         s.upload_dir.mkdir(parents=True, exist_ok=True)
         return c
 
+    @property
+    def sparse(self):
+        """BM25 encoder (Sudachi) – nạp lười, dùng chung trong process."""
+        from jplegal.retrieval.sparse import get_encoder
+
+        s = self.settings
+        return get_encoder(s.sudachi_dict, s.bm25_k1, s.bm25_b, s.bm25_avg_len)
+
+    def sparse_doc(self, payload: dict):
+        from jplegal.retrieval.sparse import doc_text_for_sparse
+
+        return self.sparse.encode_doc(doc_text_for_sparse(
+            payload.get("law_title", ""), payload.get("article_title", ""), payload.get("caption", ""),
+            payload.get("text", "")))
+
     async def close(self) -> None:
         await self.egov.close()
         await self.models.close()
