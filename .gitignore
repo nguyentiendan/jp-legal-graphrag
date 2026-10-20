@@ -11,3 +11,5 @@ data/import/*
 !data/import/.gitkeep
 *.tar
 *.tgz
+README.md
+docs/*
