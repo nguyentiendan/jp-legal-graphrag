@@ -4,8 +4,8 @@ POST /v1/embeddings   {"input": [str] | str, "model": "..."}         → OpenAI-
 POST /v1/rerank       {"query": str, "documents": [str], "top_n": int} → {"results": [{index, relevance_score}]}
 GET  /health
 
-Lưu ý: prefix của Ruri v3 ("検索クエリ: " / "検索文書: ") do client (backend) thêm vào.
-On-prem / air-gapped: đặt HF_HUB_OFFLINE=1 và mount sẵn thư mục model vào HF_HOME (/models).
+Note: Ruri v3 prefixes ("検索クエリ: " / "検索文書: ") are added by the client (backend).
+On-prem / air-gapped: set HF_HUB_OFFLINE=1 and pre-mount the model dir into HF_HOME (/models).
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ RERANK_MODEL = os.getenv("RERANK_MODEL", "cl-nagoya/ruri-v3-reranker-310m")
 DEVICE = os.getenv("MODEL_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
 EMBED_BATCH = int(os.getenv("EMBED_BATCH_SIZE", "16"))
 RERANK_BATCH = int(os.getenv("RERANK_BATCH_SIZE", "16"))
-MAX_SEQ_LEN = int(os.getenv("MAX_SEQ_LENGTH", "2048"))  # Ruri v3 hỗ trợ 8192; giảm để tiết kiệm RAM/VRAM
+MAX_SEQ_LEN = int(os.getenv("MAX_SEQ_LENGTH", "2048"))  # Ruri v3 supports 8192; lowered to save RAM/VRAM
 USE_FP16 = os.getenv("USE_FP16", "auto")
 TORCH_THREADS = int(os.getenv("TORCH_THREADS", "0"))
 
 state: dict = {}
-_lock = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENCY", "1")))  # tuần tự hoá inference trên 1 GPU/CPU
+_lock = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENCY", "1")))  # serialize inference on 1 GPU/CPU
 
 
 @asynccontextmanager

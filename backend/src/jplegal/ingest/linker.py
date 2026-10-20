@@ -1,9 +1,9 @@
-"""Resolve dẫn chiếu thô (legal_refs) → cạnh trong Neo4j.
+"""Resolve raw references (legal_refs) → edges in Neo4j.
 
-PostgreSQL.legal_refs là nguồn sự thật. Mỗi khi ingest 1 luật mới, chạy lại cho:
-  * refs của chính luật đó,
-  * refs chưa resolve (có thể giờ đã trỏ được tới luật vừa nạp),
-  * refs đang trỏ tới luật đó (để dựng lại cạnh sau khi re-ingest).
+PostgreSQL.legal_refs is the source of truth. Whenever a new law is ingested, re-run for:
+  * refs of that law itself,
+  * unresolved refs (they may now point to the newly loaded law),
+  * refs pointing at that law (to rebuild edges after re-ingest).
 """
 
 from __future__ import annotations
@@ -34,11 +34,11 @@ class LawRegistry:
             return None
         if name in self.by_name:
             return self.by_name[name]
-        # tên thô có thể dính tiền tố rác: '受ける職業訓練の訓練課程に応じ職業能力開発促進法施行規則'
+        # raw names may carry a junk prefix: '受ける職業訓練の訓練課程に応じ職業能力開発促進法施行規則'
         best = max((n for n in self.by_name if len(n) >= 3 and name.endswith(n)), key=len, default=None)
         if best:
             return self.by_name[best]
-        # tên thô bị cắt mất đầu: '行う労働者の福祉に関する法律'
+        # raw names may be truncated at the head: '行う労働者の福祉に関する法律'
         if len(name) >= 6:
             cands = [t for t in self.titles if t.endswith(name)]
             if len(cands) == 1:

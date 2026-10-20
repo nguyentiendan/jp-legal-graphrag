@@ -1,6 +1,6 @@
-"""/api/search (chỉ retrieval) và /api/ask (retrieval + LLM, stream SSE).
+"""/api/search (retrieval only) and /api/ask (retrieval + LLM, SSE stream).
 
-SSE events của /api/ask:
+SSE events of /api/ask:
     event: retrieval   data: {items, timings_ms, subgraph}
     event: token       data: {"t": "..."}
     event: done        data: {"answer": "...", "citations": [...]}
@@ -28,7 +28,7 @@ class QueryRequest(BaseModel):
     law_ids: list[str] | None = None
     use_graph: bool = True
     use_rerank: bool = True
-    use_sparse: bool | None = None  # None = theo SPARSE_ENABLED
+    use_sparse: bool | None = None  # None = follow SPARSE_ENABLED
     top_k: int | None = Field(None, ge=1, le=30)
 
 

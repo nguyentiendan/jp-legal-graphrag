@@ -1,9 +1,9 @@
-"""Qdrant – mỗi chunk = 1 point gồm 2 named vector:
+"""Qdrant – each chunk = 1 point with 2 named vectors:
     dense  : Ruri v3 768-d, cosine
-    bm25   : sparse vector (Sudachi + trọng số tf BM25), modifier=IDF → Qdrant tự tính IDF
-+ payload để filter. Point id = uuid5(chunk_uid). Payload chứa article_uid (khoá chung với Neo4j / PostgreSQL).
+    bm25   : sparse vector (Sudachi + BM25 tf weights), modifier=IDF → Qdrant computes IDF itself
++ payload for filtering. Point id = uuid5(chunk_uid). Payload holds article_uid (shared key with Neo4j / PostgreSQL).
 
-Hybrid search (dense + sparse) chạy trong 1 request: 2 prefetch + fusion RRF / DBSF của Qdrant.
+Hybrid search (dense + sparse) runs in 1 request: 2 prefetches + Qdrant's RRF / DBSF fusion.
 """
 
 from __future__ import annotations
@@ -66,12 +66,12 @@ class QdrantStore:
         self._has_sparse = None
 
     async def has_sparse(self) -> bool:
-        """Collection đã có sparse vector "bm25" chưa (collection tạo từ P0 thì chưa → cần reindex-sparse)."""
+        """Whether the collection already has the "bm25" sparse vector (P0-created ones don't → need reindex-sparse)."""
         if getattr(self, "_has_sparse", None) is None:
             try:
                 info = await self.client.get_collection(self.collection)
                 self._has_sparse = SPARSE in (info.config.params.sparse_vectors or {})
-            except Exception:  # collection chưa tồn tại
+            except Exception:  # collection doesn't exist yet
                 return False
         return bool(self._has_sparse)
 
@@ -136,7 +136,7 @@ class QdrantStore:
     async def search_hybrid(self, vector: list[float], svec: SparseVec, limit: int, law_ids: list[str] | None = None,
                             fusion: str = "rrf", prefetch_limit: int | None = None, rrf_k: int = 60,
                             weights: tuple[float, float] | None = None) -> list[DenseHit]:
-        """Dense + sparse trong 1 request: 2 prefetch → fusion (rrf | dbsf) của Qdrant."""
+        """Dense + sparse in 1 request: 2 prefetches → Qdrant fusion (rrf | dbsf)."""
         if not svec:
             return await self.search(vector, limit, law_ids)
         flt = _match("law_id", law_ids) if law_ids else None
@@ -159,10 +159,11 @@ class QdrantStore:
     # ------------------------------------------------------------------ sparse maintenance
     async def reindex_sparse(self, encode: Callable[[dict], SparseVec], batch: int = 256,
                              progress: Callable[[int, str], Awaitable[None]] | None = None) -> dict:
-        """Tính lại sparse vector cho toàn bộ point.
+        """Recompute sparse vectors for all points.
 
-        Collection cũ (P0, chưa có "bm25") → tạo collection tạm có cả dense + sparse, chép dense + payload sang,
-        xoá collection cũ, tạo lại với schema mới và chép về (Qdrant không thêm named vector vào collection có sẵn).
+        Old collections (P0, no "bm25") → create a temp collection with dense + sparse, copy dense + payload over,
+        delete the old collection, recreate it with the new schema and copy back (Qdrant can't add a named
+        vector to an existing collection).
         """
         migrated = False
         if not await self.has_sparse():
@@ -220,7 +221,7 @@ class QdrantStore:
                 break
 
     async def vectors_for_articles(self, article_uids: list[str]) -> dict[str, list[list[float]]]:
-        """Lấy vector của mọi chunk thuộc các article (để chấm cosine cho node mở rộng từ graph)."""
+        """Fetch vectors of all chunks in given articles (to cosine-score graph-expanded nodes)."""
         if not article_uids:
             return {}
         out: dict[str, list[list[float]]] = {}

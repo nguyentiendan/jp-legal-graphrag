@@ -1,6 +1,6 @@
-"""LLM qua LiteLLM – 1 interface cho vLLM/Ollama on-prem, OpenAI, Anthropic, OpenRouter, ...
+"""LLM via LiteLLM – 1 interface for on-prem vLLM/Ollama, OpenAI, Anthropic, OpenRouter, ...
 
-Đổi model chỉ bằng biến môi trường:
+Switch models via environment variables only:
     LLM_MODEL=openai/Qwen/Qwen3-32B   LLM_API_BASE=http://vllm:8000/v1   LLM_API_KEY=dummy   (vLLM on-prem)
     LLM_MODEL=ollama_chat/qwen3:14b   LLM_API_BASE=http://ollama:11434                         (Ollama)
     LLM_MODEL=openrouter/deepseek/deepseek-chat  LLM_API_KEY=sk-or-...                          (cloud)
@@ -34,7 +34,7 @@ class LLMClient:
         if self.s.llm_api_key:
             kw["api_key"] = self.s.llm_api_key
         if self.s.llm_num_ctx and self.s.llm_model.startswith("ollama"):
-            kw["num_ctx"] = self.s.llm_num_ctx  # LiteLLM chuyển vào options.num_ctx của Ollama
+            kw["num_ctx"] = self.s.llm_num_ctx  # LiteLLM forwards this to Ollama's options.num_ctx
         return kw
 
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:

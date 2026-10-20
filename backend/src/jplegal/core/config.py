@@ -1,4 +1,4 @@
-"""Cấu hình tập trung – đọc từ biến môi trường / file .env (xem .env.example ở root)."""
+"""Centralized config – read from environment variables / .env file (see .env.example at root)."""
 
 from functools import lru_cache
 from pathlib import Path
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/data")
     prompts_dir: Path = Path("/app/prompts")
     max_upload_mb: int = 50
-    cors_origins: str = ""  # "," separated; để trống khi FE và API cùng origin qua Nginx
+    cors_origins: str = ""  # "," separated; leave empty when FE and API share an origin via Nginx
 
     # ---- PostgreSQL (metadata, jobs, references) ----
     postgres_dsn: str = "postgresql+asyncpg://jplegal:jplegal@postgres:5432/jplegal"
@@ -43,36 +43,36 @@ class Settings(BaseSettings):
     doc_prefix: str = "検索文書: "
 
     # ---- LLM (LiteLLM) ----
-    # Ví dụ on-prem vLLM:  LLM_MODEL=openai/Qwen/Qwen3-32B  LLM_API_BASE=http://vllm:8000/v1
-    # Ví dụ cloud:         LLM_MODEL=openrouter/deepseek/deepseek-chat  LLM_API_KEY=...
+    # Example on-prem vLLM:  LLM_MODEL=openai/Qwen/Qwen3-32B  LLM_API_BASE=http://vllm:8000/v1
+    # Example cloud:         LLM_MODEL=openrouter/deepseek/deepseek-chat  LLM_API_KEY=...
     llm_model: str = ""
     llm_api_base: str | None = None
     llm_api_key: str | None = None
     llm_temperature: float = 0.0
     llm_max_tokens: int = 1500
     llm_timeout: float = 300.0
-    # Ollama mặc định chỉ dùng context 2048 token → prompt (6 điều luật) bị cắt. 0 = không gửi.
+    # Ollama defaults to a 2048-token context → prompts (6 articles) get cut. 0 = don't send.
     llm_num_ctx: int = 16384
 
     # ---- e-Gov 法令API ----
     egov_api_base: str = "https://laws.e-gov.go.jp/api/2"
     egov_bulk_url: str = "https://laws.e-gov.go.jp/bulkdownload"
-    egov_min_interval_sec: float = 1.0  # tự áp rate limit: tối đa 1 request / giây (toàn hệ thống)
+    egov_min_interval_sec: float = 1.0  # self-imposed rate limit: at most 1 request / second (system-wide)
     egov_max_retries: int = 5
     egov_timeout: float = 120.0
     egov_user_agent: str = "jp-legal-graphrag/0.1 (on-prem; contact: admin@example.local)"
-    enable_daily_update: bool = False  # cron cập nhật luật đã ingest (bulk file_section=3)
+    enable_daily_update: bool = False  # cron to update ingested laws (bulk file_section=3)
 
     # ---- Ingest ----
-    include_suppl_provisions: bool = False  # 附則 – MVP bỏ qua
+    include_suppl_provisions: bool = False  # 附則 – skipped in MVP
     max_chunk_chars: int = 2400
 
     # ---- Retrieval ----
     dense_top_k: int = 20
-    seed_k: int = 5  # số điều dense đứng đầu dùng làm seed để mở rộng graph
-    graph_max: int = 10  # số ứng viên graph tối đa (đưa vào pool rerank)
-    graph_slots: int = 2  # khi không rerank: số vị trí dành cho điều lấy từ graph
-    fusion_mode: str = "slots"  # "slots" (mặc định) | "rrf"
+    seed_k: int = 5  # top dense articles used as seeds for graph expansion
+    graph_max: int = 10  # max graph candidates (fed into the rerank pool)
+    graph_slots: int = 2  # without rerank: slots reserved for graph-retrieved articles
+    fusion_mode: str = "slots"  # "slots" (default) | "rrf"
     delegated_per_law: int = 3
     rrf_k: int = 60
     w_dense: float = 1.0
@@ -83,13 +83,13 @@ class Settings(BaseSettings):
     rerank_max_chars: int = 3000
 
     # ---- Sparse / BM25 (Sudachi) ----
-    sparse_enabled: bool = True  # nhánh BM25; cần collection có sparse vector (jplegal reindex-sparse)
-    sudachi_dict: str = "core"  # core | full (cần cài sudachidict-full)
+    sparse_enabled: bool = True  # BM25 branch; needs a collection with sparse vectors (jplegal reindex-sparse)
+    sudachi_dict: str = "core"  # core | full (requires installing sudachidict-full)
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
-    bm25_avg_len: float = 100.0  # số token trung bình / chunk (đo trên corpus 労働 ≈ 100); đổi → reindex-sparse
-    hybrid_fusion: str = "dbsf"  # dbsf | rrf  (fusion dense + sparse trong Qdrant; DBSF tốt hơn trên bộ eval)
-    hybrid_w_dense: float = 1.0  # trọng số RRF (chỉ dùng khi fusion = rrf)
+    bm25_avg_len: float = 100.0  # avg tokens / chunk (measured ≈ 100 on the 労働 corpus); change → reindex-sparse
+    hybrid_fusion: str = "dbsf"  # dbsf | rrf  (dense + sparse fusion inside Qdrant; DBSF scores better on the eval set)
+    hybrid_w_dense: float = 1.0  # RRF weight (only used when fusion = rrf)
     hybrid_w_sparse: float = 1.0
     hybrid_rrf_k: int = 60
 

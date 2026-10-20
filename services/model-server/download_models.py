@@ -1,5 +1,5 @@
-"""Tải trước model vào HF_HOME (dùng khi build image với PRELOAD_MODELS=true,
-hoặc chạy 1 lần trên máy có internet rồi copy thư mục /models sang server air-gapped)."""
+"""Pre-download models into HF_HOME (for image builds with PRELOAD_MODELS=true,
+or run once on an internet-connected machine then copy /models to the air-gapped server)."""
 
 import os
 

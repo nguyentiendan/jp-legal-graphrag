@@ -1,12 +1,12 @@
-"""Trích dẫn chiếu (rule-based) từ văn bản luật Nhật.
+"""Rule-based reference extraction from Japanese law text.
 
-Hỗ trợ:
-  * 第◯条(の◯)… – cùng luật hoặc kèm tên luật phía trước: 労働契約法第十八条, 法第十五条, 同法第二条
+Supports:
+  * 第◯条(の◯)… – same law or preceded by a law name: 労働契約法第十八条, 法第十五条, 同法第二条
   * 前条 / 前二条 / 次条 / 同条
-  * Khoảng: 第三十二条から第三十二条の五まで (mở rộng theo thứ tự điều trong cùng luật)
+  * Ranges: 第三十二条から第三十二条の五まで (expanded in article order within the same law)
   * 準用 → APPLIES_MUTATIS_MUTANDIS
-  * 委任: 政令で定める / ◯◯省令で定める → DELEGATES_TO (tới 施行令 / 施行規則)
-  * Định nghĩa tên gọi tắt: 労働基準法（昭和二十二年法律第四十九号。以下「法」という。）
+  * 委任: 政令で定める / ◯◯省令で定める → DELEGATES_TO (to 施行令 / 施行規則)
+  * Short-name definitions: 労働基準法（昭和二十二年法律第四十九号。以下「法」という。）
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ _DELEGATION_RE = re.compile(r"(政令|[一-龥]{0,10}省令|府令|命令)で定
 
 @dataclass
 class _Target:
-    law_name: str | None  # None = cùng luật
+    law_name: str | None  # None = same law
     key: str
 
 
@@ -54,7 +54,7 @@ def _key(n: str, sub: str) -> str:
 
 
 def _strip_trailing_paren(s: str) -> str:
-    """Bỏ cụm （…） ở cuối (có thể lồng nhau 1 cấp)."""
+    """Drop a trailing （…） group (may nest 1 level)."""
     while s.endswith("）"):
         depth = 0
         for i in range(len(s) - 1, -1, -1):
@@ -72,7 +72,7 @@ def _strip_trailing_paren(s: str) -> str:
 
 
 def split_sentences(text: str) -> list[str]:
-    """Tách câu tại 「。」 nằm ngoài （） và 「」."""
+    """Split sentences at 「。」 outside （） and 「」."""
     out, buf, depth = [], [], 0
     for ch in text:
         buf.append(ch)
@@ -106,10 +106,10 @@ def extract_aliases(parsed: ParsedLaw) -> dict[str, str]:
     title = parsed.meta.title
     aliases: dict[str, str] = {}
     parent = parent_title(title)
-    if parent:  # mặc định cho 施行令 / 施行規則
+    if parent:  # defaults for 施行令 / 施行規則
         aliases["法"] = parent
         aliases["令"] = f"{parent}施行令"
-    defined: set[str] = set()  # alias đã được định nghĩa trong văn bản (ưu tiên hơn mặc định)
+    defined: set[str] = set()  # aliases defined in the text (take precedence over defaults)
     for art in parsed.articles:
         if art.is_suppl:
             continue
@@ -133,9 +133,9 @@ class ReferenceExtractor:
 
     # ---------- helpers ----------
     def _law_before(self, before: str, last_law: str | None) -> str | None:
-        """Xác định luật được nhắc ngay trước 第◯条. None = cùng luật."""
+        """Determine the law named right before 第◯条. None = same law."""
         stripped = _strip_trailing_paren(before)
-        # 1) tên gọi tắt / この法律 / 同法 – chỉ khi ký tự trước đó không phải chữ của tên luật
+        # 1) short name / この法律 / 同法 – only when the preceding char is not part of a law name
         specials = list(SELF_NAMES) + list(_SAME_NAMES) + list(self.aliases)
         for name in sorted(specials, key=len, reverse=True):
             if stripped.endswith(name):
@@ -148,7 +148,7 @@ class ReferenceExtractor:
                     return last_law
                 target = self.aliases[name]
                 return None if target == self.title else target
-        # 2) tên luật đầy đủ
+        # 2) full law name
         nm = _NAME_BEFORE_RE.search(stripped)
         if not nm:
             return None
@@ -195,7 +195,7 @@ class ReferenceExtractor:
                 quoted = [(q.start(), q.end()) for q in _QUOTE_RE.finditer(sentence)]
                 for m in _REF_RE.finditer(sentence):
                     if any(a <= m.start() < b for a, b in quoted):
-                        continue  # 読み替え「…」 – không phải dẫn chiếu thật
+                        continue  # 読み替え「…」 – not a real reference
                     span = sentence[max(0, m.start() - 20) : m.end() + 10]
                     if m.group("rel"):
                         kind, cnt = m.group("rel"), m.group("cnt")

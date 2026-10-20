@@ -13,3 +13,6 @@ data/import/*
 *.tgz
 README.md
 docs/*
+.DS_Store
+.vscode
+

@@ -1,14 +1,14 @@
 """Retrieval: Dense + Sparse/BM25 (Qdrant hybrid) + Graph expansion (Neo4j) → fusion → Rerank (ruri-v3-reranker).
 
-1. Embed câu hỏi (prefix 検索クエリ: ) + Sudachi/BM25 sparse vector
-2. First stage (Qdrant): dense | sparse | hybrid (2 prefetch + RRF/DBSF trong Qdrant) → gộp theo article (max)
-3. Seed = top seed_k article → mở rộng 1-hop REFERS_TO / 準用 / 委任 (2 chiều)
-   - node Article: chấm cosine(query, vector chunk của article) → xếp hạng
-   - node Law (委任 tới 施行令/施行規則): dense search giới hạn trong law đó (top delegated_per_law)
-4. Fusion: "slots" (mặc định) – dense là chính, graph bổ sung tối đa graph_slots điều mới;
-   khi rerank: pool = dense top rerank_top_n ∪ graph candidates, cross-encoder quyết định thứ tự.
-   "rrf" – weighted RRF (w_dense, w_graph, rrf_k) để so sánh.
-5. Rerank top-N bằng cross-encoder → final_k
+1. Embed the question (prefix 検索クエリ: ) + Sudachi/BM25 sparse vector
+2. First stage (Qdrant): dense | sparse | hybrid (2 prefetches + RRF/DBSF inside Qdrant) → merge by article (max)
+3. Seed = top seed_k articles → 1-hop expansion of REFERS_TO / 準用 / 委任 (both directions)
+   - Article node: score cosine(query, article chunk vectors) → rank
+   - Law node (委任 to 施行令/施行規則): dense search restricted to that law (top delegated_per_law)
+4. Fusion: "slots" (default) – dense is primary, graph adds at most graph_slots new articles;
+   with rerank: pool = dense top rerank_top_n ∪ graph candidates, cross-encoder decides the order.
+   "rrf" – weighted RRF (w_dense, w_graph, rrf_k) for comparison.
+5. Rerank top-N with the cross-encoder → final_k
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ from jplegal.retrieval.fusion import slot_fusion, weighted_rrf
 class RetrievalOptions:
     use_graph: bool = True
     use_rerank: bool = True
-    use_sparse: bool | None = None  # None = theo SPARSE_ENABLED
+    use_sparse: bool | None = None  # None = follow SPARSE_ENABLED
     law_ids: list[str] | None = None
     final_k: int | None = None
-    first_stage: str | None = None  # dense | sparse | hybrid (None = tự chọn theo use_sparse)
+    first_stage: str | None = None  # dense | sparse | hybrid (None = auto-select by use_sparse)
     fusion: str | None = None  # rrf | dbsf (None = HYBRID_FUSION)
 
 
@@ -112,7 +112,7 @@ class Retriever:
         use_sparse = s.sparse_enabled if opts.use_sparse is None else opts.use_sparse
         stage = opts.first_stage or ("hybrid" if use_sparse else "dense")
         if stage != "dense" and not await self.c.qdrant.has_sparse():
-            stage = "dense"  # collection chưa có sparse vector (chưa chạy reindex-sparse)
+            stage = "dense"  # collection has no sparse vectors yet (reindex-sparse not run)
         sv = self.c.sparse.encode_query(query) if stage != "dense" else None
         if stage != "dense" and not sv:
             stage = "dense"
@@ -124,7 +124,7 @@ class Retriever:
             d_hits, s_hits = [], await self.c.qdrant.search_sparse(sv, limit=lim, law_ids=opts.law_ids)
             hits = s_hits
         else:
-            # thứ hạng do Qdrant fusion quyết định; 2 truy vấn riêng chỉ để hiển thị nhánh nào tìm thấy (vài ms)
+            # Qdrant fusion decides the ranking; the 2 extra queries only show which branch matched (a few ms)
             d_hits, s_hits, hits = await asyncio.gather(
                 self.c.qdrant.search(qv, limit=lim, law_ids=opts.law_ids),
                 self.c.qdrant.search_sparse(sv, limit=lim, law_ids=opts.law_ids),
@@ -149,7 +149,7 @@ class Retriever:
         if opts.use_graph and ranked:
             t2 = time.perf_counter()
             seeds = ranked[: s.seed_k]
-            # chỉ loại các điều đã nằm trong top final_k – điều first stage xếp hạng thấp vẫn có thể được graph kéo lên
+            # only exclude articles already in top final_k – a low-ranked first-stage article can still be pulled up by graph
             dense_set = set(ranked[:final_k])
             edges = await self.c.neo4j.expand(seeds)
             art_cands: set[str] = set()
@@ -159,7 +159,7 @@ class Retriever:
                 edges_for_view.append({"source": e.src if e.outgoing else e.dst,
                                        "target": e.dst if e.outgoing else e.src, "rel": e.rel})
                 if e.dst_kind == "Article":
-                    if e.dst in dense_set:  # chỉ lấy điều mà dense chưa tìm thấy
+                    if e.dst in dense_set:  # only take articles dense missed
                         continue
                     art_cands.add(e.dst)
                     via.setdefault(e.dst, []).append(info)
@@ -170,7 +170,7 @@ class Retriever:
             vecs = await self.c.qdrant.vectors_for_articles(sorted(art_cands))
             for uid, vs in vecs.items():
                 graph_scores[uid] = _cos(qn, vs)
-            # 委任: tìm điều liên quan nhất trong 施行令/施行規則 được uỷ quyền
+            # 委任: find the most relevant article in the delegated 施行令/施行規則
             for law_id, infos in list(law_cands.items())[:5]:
                 for h in await self.c.qdrant.search(qv, limit=s.delegated_per_law * 2, law_ids=[law_id]):
                     if h.article_uid in dense_set:
@@ -194,7 +194,7 @@ class Retriever:
         else:
             cands = slot_fusion(dense_ranked, graph_ranked, final_k, s.graph_slots)[:final_k]
         details = await self.c.neo4j.get_articles([u for u, _ in cands])
-        # fallback cho article chưa có trong Neo4j (vd. lỗi ghi) → lấy từ payload Qdrant
+        # fallback for articles missing in Neo4j (e.g. write error) → take from Qdrant payload
         payloads = {h.article_uid: h.payload for h in (*hits, *d_hits, *s_hits)}
 
         items: list[RetrievedArticle] = []

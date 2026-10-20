@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.7
 # ---------------------------------------------------------------------------
 # Model server: Ruri v3 embedding + reranker (cl-nagoya/ruri-v3-310m, ruri-v3-reranker-310m)
-#   CPU (mặc định):  docker build services/model-server
+#   CPU (default):  docker build services/model-server
 #   GPU (CUDA 12.8): docker build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 services/model-server
-#   Air-gapped:      --build-arg PRELOAD_MODELS=true để nhúng model vào image,
-#                    hoặc chép thư mục HF cache vào volume "models" (xem README).
+#   Air-gapped:      --build-arg PRELOAD_MODELS=true to embed models into the image,
+#                    or copy HF cache directory to "models" volume (see README).
 # ---------------------------------------------------------------------------
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 FROM ${PYTHON_IMAGE}
@@ -29,7 +29,7 @@ RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app 
     && mkdir -p /models /app && chown -R app:app /models /app
 WORKDIR /app
 
-# torch cài riêng từ index CPU/CUDA để không kéo nhầm bản CUDA khổng lồ khi chạy CPU
+# Install torch from CPU/CUDA index separately to avoid pulling the large CUDA wheel on CPU builds
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url ${TORCH_INDEX_URL} "torch${TORCH_VERSION:+==${TORCH_VERSION}}"
 COPY requirements.txt .
@@ -43,5 +43,5 @@ RUN if [ "${PRELOAD_MODELS}" = "true" ]; then python download_models.py; fi
 EXPOSE 8080
 VOLUME ["/models"]
 HEALTHCHECK --interval=20s --timeout=5s --start-period=180s --retries=40 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status==200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status==200 else 1)"
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

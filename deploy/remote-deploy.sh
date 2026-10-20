@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Chạy TRÊN EC2 (GitHub Actions gọi qua SSH, hoặc chạy tay).
+# Run ON EC2 (called by GitHub Actions via SSH, or run manually).
 #   IMAGE_PREFIX=ghcr.io/<owner>/jplegal IMAGE_TAG=<sha> ./deploy/remote-deploy.sh
-# Token registry (tuỳ chọn) đọc từ stdin để không lộ trong process list:
+# Registry token (optional) reads from stdin to avoid leaking in process list:
 #   printf '%s' "$TOKEN" | REGISTRY_USER=<user> IMAGE_PREFIX=... IMAGE_TAG=... ./deploy/remote-deploy.sh
 #
-# Biến môi trường:
-#   IMAGE_PREFIX, IMAGE_TAG   (bắt buộc)
-#   REGISTRY_USER             user đăng nhập registry (kèm token qua stdin)
-#   USE_GPU=false|true        thêm docker-compose.gpu.yml
+# Environment variables:
+#   IMAGE_PREFIX, IMAGE_TAG   (required)
+#   REGISTRY_USER             registry login user (pass token via stdin)
+#   USE_GPU=false|true        add docker-compose.gpu.yml
 #   ENABLE_OLLAMA=true|false  false = --scale ollama=0 --scale ollama-pull=0
-#   HEALTH_TIMEOUT=900        giây chờ api/web healthy (lần đầu model-server tải model ~1-2GB)
-#   ROLLBACK=true             tự quay về tag trước nếu healthcheck fail
+#   HEALTH_TIMEOUT=900        seconds to wait for api/web healthy (first time model-server loads models ~1-2GB)
+#   ROLLBACK=true             auto-rollback to previous tag if healthcheck fails
 # ---------------------------------------------------------------------------
 set -Eeuo pipefail
 
@@ -28,10 +28,10 @@ REGISTRY="${IMAGE_PREFIX%%/*}"
 
 log() { printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"; }
 
-# ---- kiểm tra môi trường ----------------------------------------------------
-command -v docker >/dev/null || { echo "docker chưa được cài (chạy deploy/ec2-bootstrap.sh)"; exit 1; }
-docker compose version >/dev/null 2>&1 || { echo "thiếu docker compose plugin"; exit 1; }
-[ -f .env ] || { echo "Thiếu $APP_DIR/.env (tạo từ .env.example hoặc set secret ENV_FILE trên GitHub)"; exit 1; }
+# ---- check environment ----------------------------------------------------
+command -v docker >/dev/null || { echo "docker not installed (run deploy/ec2-bootstrap.sh)"; exit 1; }
+docker compose version >/dev/null 2>&1 || { echo "missing docker compose plugin"; exit 1; }
+[ -f .env ] || { echo "Missing $APP_DIR/.env (create from .env.example or set secret ENV_FILE on GitHub)"; exit 1; }
 
 COMPOSE_FILES=(-f docker-compose.yml)
 [ "$USE_GPU" = "true" ] && COMPOSE_FILES+=(-f docker-compose.gpu.yml)
@@ -42,7 +42,7 @@ SCALE_ARGS=()
 
 dc() { docker compose --env-file .env --env-file .env.deploy "${COMPOSE_FILES[@]}" "$@"; }
 
-# ---- đăng nhập registry (token từ stdin) ------------------------------------
+# ---- registry login (token from stdin) ------------------------------------
 TOKEN=""
 if [ ! -t 0 ]; then TOKEN="$(cat || true)"; fi
 LOGGED_IN=false
@@ -54,7 +54,7 @@ if [ -n "$TOKEN" ]; then
   LOGGED_IN=true
 fi
 
-# ---- ghi tag mới, giữ tag cũ để rollback ------------------------------------
+# ---- write new tag, keep previous tag for rollback --------------------------
 PREV_TAG=""
 if [ -f .env.deploy ]; then
   PREV_TAG="$(sed -n 's/^IMAGE_TAG=//p' .env.deploy | tail -1)"
@@ -93,24 +93,24 @@ deploy() {
 
 log "Deploy $IMAGE_PREFIX:$IMAGE_TAG (prev=${PREV_TAG:-none}, gpu=$USE_GPU, ollama=$ENABLE_OLLAMA)"
 deploy
-log "Chờ api & web healthy (timeout ${HEALTH_TIMEOUT}s)"
+log "Wait api & web healthy (timeout ${HEALTH_TIMEOUT}s)"
 if wait_healthy; then
   log "Deploy OK: $IMAGE_TAG"
   dc ps
 else
-  log "Healthcheck FAIL — log gần nhất:"
+  log "Healthcheck FAIL — latest log:"
   dc logs --tail=80 api web model-server || true
   if [ "$ROLLBACK" = "true" ] && [ -f .env.deploy.prev ] && [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$IMAGE_TAG" ]; then
-    log "Rollback về $PREV_TAG"
+    log "Rollback to $PREV_TAG"
     cp .env.deploy.prev .env.deploy
     deploy || true
-    wait_healthy || log "Rollback cũng chưa healthy, cần kiểm tra tay"
+    wait_healthy || log "Rollback also not healthy, check manually"
   fi
   exit 1
 fi
 
-# ---- dọn image cũ của app (giữ tag hiện tại và tag trước) -------------------
-log "Dọn image cũ"
+# ---- clean up old app images (keep current tag and previous tag) ------------
+log "Clean up old images"
 docker image ls --format '{{.Repository}}:{{.Tag}}' \
   | grep -E "^${IMAGE_PREFIX//./\\.}/(api|worker|web|model-server):" \
   | grep -vE ":(${IMAGE_TAG}|${PREV_TAG:-__none__}|latest)$" \

@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-/** Nhãn ngắn trên canvas: "労働基準法施行規則 第二十一条" → "則 第二十一条"; tên đầy đủ hiện ở tooltip */
+/** Short label on canvas: "労働基準法施行規則 第二十一条" → "則 第二十一条"; full name shown in tooltip */
 function shortLabel(label: string, kind?: string): string {
   if (kind === "Law") return label.length > 12 ? label.slice(0, 12) + "…" : label;
   const m = label.match(/^(.*?)\s*(第.+)$/);

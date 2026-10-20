@@ -1,4 +1,4 @@
-"""Chia chunk theo đơn vị điều luật (条). Điều quá dài → tách theo nhóm 項."""
+"""Split into chunks by article (条). Overlong articles → split by 項 groups."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def build_chunks(parsed: ParsedLaw, max_chars: int = 2400) -> list[Chunk]:
             if size and size + len(line) > max_chars:
                 groups.append([])
                 size = 0
-            # 1 项 quá dài → cắt cứng theo câu
+            # 1 overlong 項 → hard-split by sentence
             while len(line) > max_chars:
                 cut = line.rfind("。", 0, max_chars)
                 cut = cut + 1 if cut > max_chars // 3 else max_chars

@@ -1,4 +1,4 @@
-"""Weighted Reciprocal Rank Fusion: score(d) = Σ_i w_i / (k + rank_i(d)), rank bắt đầu từ 1."""
+"""Weighted Reciprocal Rank Fusion: score(d) = Σ_i w_i / (k + rank_i(d)), ranks start at 1."""
 
 from __future__ import annotations
 
@@ -17,13 +17,14 @@ def weighted_rrf(rankings: dict[str, list[str]], weights: dict[str, float], k: i
 
 
 def slot_fusion(dense: list[str], graph: list[str], final_k: int, slots: int) -> list[tuple[str, float]]:
-    """Dense (first stage) là danh sách chính; graph bổ sung tối đa `slots` điều chưa có trong top `final_k`
-    (điều first stage xếp hạng thấp hơn final_k cũng được kéo lên).
+    """Dense (first stage) is the main list; graph adds at most `slots` articles missing from top `final_k`
+    (a first-stage article ranked below final_k can also be pulled up).
 
-    Thứ tự: dense[: final_k - slots] → graph (mới) → phần dense còn lại.
-    Score trả về là 1/rank để hiển thị (không có ý nghĩa tuyệt đối).
-    Lý do: với Ruri v3, dense đã rất mạnh; RRF cộng điểm khiến các điều "vừa dense hạng thấp vừa là hàng xóm"
-    vượt lên trên điều đúng (đo bằng eval/queries.jsonl). Graph đóng vai trò cung cấp ngữ cảnh liên quan.
+    Order: dense[: final_k - slots] → graph (new) → remaining dense.
+    Returned scores are 1/rank for display (no absolute meaning).
+    Rationale: with Ruri v3, dense is already very strong; additive RRF lets articles that are
+    "both low-ranked by dense and graph neighbors" overtake the correct one (measured on eval/queries.jsonl).
+    Graph's role is to supply related context.
     """
     top = set(dense[:final_k])
     new_graph = [g for g in dict.fromkeys(graph) if g not in top][: max(0, slots)]

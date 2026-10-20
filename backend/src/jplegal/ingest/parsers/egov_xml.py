@@ -1,6 +1,6 @@
-"""Parser cho 法令標準XML của e-Gov (API v2 / XML一括ダウンロード).
+"""Parser for e-Gov 法令標準XML (API v2 / XML一括ダウンロード).
 
-Cấu trúc chính:
+Main structure:
     Law > LawBody > MainProvision > (Part > Chapter > Section > Subsection > Division)* > Article
     Article > ArticleCaption, ArticleTitle, Paragraph > ParagraphNum, ParagraphSentence > Sentence,
                                                     Item > ItemTitle, ItemSentence, Subitem1 ...
@@ -29,7 +29,7 @@ _ERA = {"Meiji": "明治", "Taisho": "大正", "Showa": "昭和", "Heisei": "平
 
 
 def _text(el: etree._Element | None) -> str:
-    """itertext nhưng bỏ phần đọc furigana (<Rt>)."""
+    """itertext but skip furigana readings (<Rt>)."""
     if el is None:
         return ""
     parts: list[str] = []
@@ -49,7 +49,7 @@ def _text(el: etree._Element | None) -> str:
 
 
 def _sentences(el: etree._Element | None) -> str:
-    """Nối các <Sentence>/<Column> trong 1 khối (ParagraphSentence / ItemSentence)."""
+    """Join <Sentence>/<Column> within one block (ParagraphSentence / ItemSentence)."""
     if el is None:
         return ""
     cols = el.findall("Column")
@@ -82,7 +82,7 @@ def _paragraph(p: etree._Element, idx: int) -> Paragraph:
     lines = [_sentences(p.find("ParagraphSentence"))]
     for item in p.findall("Item"):
         lines.extend(_item_text(item))
-    # Bảng trong 項 (TableStruct) – lấy text thô theo hàng
+    # Tables inside 項 (TableStruct) – take raw text row by row
     for ts in p.findall(".//TableStruct"):
         for row in ts.iter("TableRow"):
             cells = [_text(c) for c in row.findall("TableColumn")]
@@ -159,7 +159,7 @@ def parse_egov_xml(xml: bytes | str, meta: LawMeta | None = None, *, law_id: str
     main = root.find("LawBody/MainProvision")
     if main is not None:
         _walk(main, meta.law_id, [], articles)
-        if not articles:  # luật ngắn: MainProvision chỉ có Paragraph
+        if not articles:  # short law: MainProvision holds only Paragraphs
             paras = [_paragraph(p, i + 1) for i, p in enumerate(main.findall("Paragraph"))]
             if paras:
                 articles.append(Article(law_id=meta.law_id, article_key="main", title="本則",

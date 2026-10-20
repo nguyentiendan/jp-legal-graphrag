@@ -1,4 +1,4 @@
-"""Chuẩn hoá số kanji / số hiệu điều luật.
+"""Normalize kanji numerals / article numbers.
 
     kanji_to_int("三十二")          -> 32
     kanji_to_int("千二百三十四")     -> 1234
@@ -40,7 +40,7 @@ _ARTICLE_RE = re.compile(rf"第({NUM_CLASS})条((?:の{NUM_CLASS})*)")
 
 
 def article_key_from_title(title: str) -> str | None:
-    """'第三十二条の二の三' -> '32_2_3'. Trả None nếu không khớp."""
+    """'第三十二条の二の三' -> '32_2_3'. Returns None on no match."""
     m = _ARTICLE_RE.search(title)
     if not m:
         return None
@@ -51,7 +51,7 @@ def article_key_from_title(title: str) -> str | None:
 
 
 def display_article(article_key: str) -> str:
-    """'32_2' -> '第32条の2' (dùng hiển thị / citation)."""
+    """'32_2' -> '第32条の2' (for display / citation)."""
     if article_key.startswith("suppl"):
         return f"附則 {article_key}"
     if article_key.startswith("c"):
@@ -61,5 +61,5 @@ def display_article(article_key: str) -> str:
 
 
 def clean_text(s: str) -> str:
-    """Bỏ whitespace ASCII do XML indent (văn bản luật không dùng space ASCII có nghĩa)."""
+    """Strip ASCII whitespace from XML indent (law text uses no meaningful ASCII spaces)."""
     return re.sub(r"[ \t\r\n]+", "", s).strip()

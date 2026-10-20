@@ -1,9 +1,9 @@
-"""Đọc file zip XML一括ダウンロード của e-Gov.
+"""Read e-Gov XML一括ダウンロード zip files.
 
-Cấu trúc zip:
+Zip layout:
     R081006.csv                                   (metadata: 法令ID, 施行日, 未施行 ...)
     {law_id}_{施行日}_{改正法令ID}/{same}.xml
-Chọn 1 revision / law_id: bỏ bản 未施行 (chưa có hiệu lực), lấy bản có 施行日 mới nhất ≤ hôm nay.
+Pick 1 revision / law_id: skip 未施行 (not yet enforced) builds, take the one with the latest 施行日 ≤ today.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from jplegal.ingest.parsers.egov_xml import ids_from_filename
 class BulkEntry:
     law_id: str
     revision_id: str
-    member: str  # đường dẫn trong zip
+    member: str  # path inside the zip
     title: str = ""
     not_yet_enforced: bool = False
 

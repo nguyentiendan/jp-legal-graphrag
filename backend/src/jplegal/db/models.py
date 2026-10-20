@@ -1,4 +1,4 @@
-"""PostgreSQL – metadata, job, registry luật, bảng dẫn chiếu (nguồn sự thật để dựng lại cạnh graph)."""
+"""PostgreSQL – metadata, jobs, law registry, reference table (source of truth for rebuilding graph edges)."""
 
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ class LegalRef(Base):
     src_uid: Mapped[str] = mapped_column(String(160), index=True)
     src_law_id: Mapped[str] = mapped_column(String(64), index=True)
     relation: Mapped[str] = mapped_column(String(48))
-    target_law_name: Mapped[str | None] = mapped_column(String(512), nullable=True)  # None = cùng luật
+    target_law_name: Mapped[str | None] = mapped_column(String(512), nullable=True)  # None = same law
     target_article_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     target_law_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)

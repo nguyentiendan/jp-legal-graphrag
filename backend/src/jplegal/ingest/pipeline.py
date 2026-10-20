@@ -1,4 +1,4 @@
-"""Ingest pipeline – dùng chung cho Batch (e-Gov) và Upload.
+"""Ingest pipeline – shared by Batch (e-Gov) and Upload.
 
     parse → chunk → embed → Qdrant → Neo4j → legal_refs (PostgreSQL) → rebuild_links
 """
@@ -51,7 +51,7 @@ async def ingest_parsed_law(c, parsed: ParsedLaw, progress: Progress = _noop, *,
     await progress(72, "Ghi Qdrant")
     await c.qdrant.delete_law(meta.law_id)
     sparse = None
-    if await c.qdrant.has_sparse():  # luôn tính BM25 khi collection hỗ trợ (bật/tắt nhánh sparse lúc truy vấn)
+    if await c.qdrant.has_sparse():  # always compute BM25 when the collection supports it (sparse branch toggled at query time)
         sparse = [c.sparse_doc({"law_title": ch.law_title, "article_title": ch.article_title,
                                 "caption": ch.caption, "text": ch.text}) for ch in chunks]
     await c.qdrant.upsert_chunks(chunks, vectors, extra={"law_type": meta.law_type, "source": meta.source,
@@ -89,7 +89,7 @@ async def ingest_parsed_law(c, parsed: ParsedLaw, progress: Progress = _noop, *,
 
 
 def parse_file(path: Path, *, document_id: str, include_suppl: bool, max_chars: int) -> ParsedLaw:
-    """Nhận diện loại file upload và parse."""
+    """Detect upload file type and parse."""
     data = path.read_bytes()
     if path.suffix.lower() == ".xml" or data[:200].lstrip().startswith(b"<?xml") or b"<Law " in data[:2000]:
         law_id, revision_id = ids_from_filename(path.name)

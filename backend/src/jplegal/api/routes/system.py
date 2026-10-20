@@ -14,7 +14,7 @@ async def health() -> dict:
 
 @router.get("/status")
 async def status(request: Request) -> dict:
-    """Kiểm tra kết nối tới từng service phụ thuộc."""
+    """Check connectivity to each dependent service."""
     c = request.app.state.c
 
     async def check(name: str, coro):

@@ -1,7 +1,7 @@
-"""CLI – chạy trong container api:   docker compose exec api jplegal <command>
+"""CLI – run inside the api container:   docker compose exec api jplegal <command>
 
-    jplegal init                                   # tạo schema Postgres / Qdrant / Neo4j
-    jplegal ingest-egov --law-id 322AC0000000049   # enqueue job (worker xử lý)
+    jplegal init                                   # create Postgres / Qdrant / Neo4j schema
+    jplegal ingest-egov --law-id 322AC0000000049   # enqueue job (processed by worker)
     jplegal ingest-egov --file config/laws.yaml
     jplegal ingest-bulk --zip /data/raw/bulk/all.zip --law-id 322AC0000000049
     jplegal ingest-file /data/inbox/通達.pdf
@@ -35,7 +35,7 @@ async def _container():
 
 @app.command()
 def init() -> None:
-    """Tạo bảng PostgreSQL, collection Qdrant, constraint Neo4j."""
+    """Create PostgreSQL tables, Qdrant collection, Neo4j constraints."""
 
     async def main():
         c = await _container()
@@ -53,7 +53,7 @@ def _load_laws_file(path: Path) -> list[str]:
 @app.command("ingest-egov")
 def ingest_egov(law_id: list[str] = typer.Option(None, "--law-id"),
                 file: Path | None = typer.Option(None, "--file", help="YAML: laws: [{law_id, title}]")) -> None:
-    """Enqueue ingest từ e-Gov 法令API (rate-limited, 1 req/s)."""
+    """Enqueue ingest from the e-Gov 法令API (rate-limited, 1 req/s)."""
     ids = list(law_id or [])
     if file:
         ids += _load_laws_file(file)
@@ -75,7 +75,7 @@ def ingest_egov(law_id: list[str] = typer.Option(None, "--law-id"),
 
 
 @app.command("ingest-bulk")
-def ingest_bulk(zip: Path | None = typer.Option(None, help="zip XML一括ダウンロード đã có sẵn"),
+def ingest_bulk(zip: Path | None = typer.Option(None, help="existing XML一括ダウンロード zip"),
                 category_cd: int | None = typer.Option(None), law_id: list[str] = typer.Option(None, "--law-id"),
                 title_contains: str | None = typer.Option(None), max_laws: int = 200) -> None:
     async def main():
@@ -96,7 +96,7 @@ def ingest_bulk(zip: Path | None = typer.Option(None, help="zip XML一括ダウ�
 
 @app.command("ingest-file")
 def ingest_file(path: Path, title: str | None = None) -> None:
-    """Ingest 1 file cục bộ (XML / PDF / DOCX / TXT) qua job queue."""
+    """Ingest 1 local file (XML / PDF / DOCX / TXT) via the job queue."""
 
     async def main():
         from jplegal.db.models import Document
@@ -138,10 +138,10 @@ def rebuild_links_cmd() -> None:
 
 @app.command("reindex-sparse")
 def reindex_sparse_cmd() -> None:
-    """Tính (lại) BM25 sparse vector cho mọi chunk trong Qdrant – không cần tải lại luật hay embed lại.
+    """(Re)compute BM25 sparse vectors for every chunk in Qdrant – no need to re-download laws or re-embed.
 
-    Collection tạo từ bản P0 (chưa có sparse vector) được tự chuyển sang schema mới.
-    Chạy lại khi đổi SUDACHI_DICT / BM25_K1 / BM25_B / BM25_AVG_LEN.
+    Collections created by P0 (without sparse vectors) are auto-migrated to the new schema.
+    Re-run when SUDACHI_DICT / BM25_K1 / BM25_B / BM25_AVG_LEN change.
     """
 
     async def main():
@@ -158,7 +158,7 @@ def reindex_sparse_cmd() -> None:
 
 @app.command()
 def search(query: str, no_graph: bool = False, no_rerank: bool = False, k: int = 6,
-           stage: str = typer.Option(None, help="dense | sparse | hybrid (mặc định theo SPARSE_ENABLED)")) -> None:
+           stage: str = typer.Option(None, help="dense | sparse | hybrid (default follows SPARSE_ENABLED)")) -> None:
     async def main():
         from jplegal.retrieval.pipeline import RetrievalOptions, Retriever
 
@@ -176,10 +176,10 @@ def search(query: str, no_graph: bool = False, no_rerank: bool = False, k: int =
 
 @app.command("eval")
 def eval_cmd(queries: Path = typer.Option(Path("/app/eval/queries.jsonl")), out: Path | None = None,
-             configs: str | None = typer.Option(None, help="danh sách cấu hình, phân tách bằng dấu phẩy"),
-             no_rerank: bool = typer.Option(False, "--no-rerank", help="bỏ các cấu hình có rerank (nhanh trên CPU)"),
-             summary: bool = typer.Option(False, "--summary", help="chỉ in bảng tổng hợp")) -> None:
-    """So sánh các cấu hình retrieval (Recall@1/5/10, MRR@10, nDCG@10, All@10)."""
+             configs: str | None = typer.Option(None, help="config list, comma-separated"),
+             no_rerank: bool = typer.Option(False, "--no-rerank", help="skip configs with rerank (faster on CPU)"),
+             summary: bool = typer.Option(False, "--summary", help="print summary table only")) -> None:
+    """Compare retrieval configs (Recall@1/5/10, MRR@10, nDCG@10, All@10)."""
     from jplegal.retrieval.evaluate import CONFIGS, run_eval
 
     names = [x.strip() for x in configs.split(",")] if configs else list(CONFIGS)

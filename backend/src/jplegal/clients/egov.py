@@ -1,11 +1,11 @@
-"""Client e-Gov 法令API v2 + XML一括ダウンロード, có rate limit toàn hệ thống.
+"""e-Gov 法令API v2 + XML一括ダウンロード client, with a system-wide rate limit.
 
-Nguyên tắc (e-Gov không công bố rate limit → tự áp):
-  * Tối đa 1 request / EGOV_MIN_INTERVAL_SEC (mặc định 1s) cho TOÀN BỘ worker – khoá trên Redis.
-  * Retry exponential backoff + jitter cho 429 / 5xx / timeout, tôn trọng Retry-After.
-  * Cache file thô theo revision_id → không tải lại bản đã có.
-  * Nạp số lượng lớn → dùng bulk download thay vì gọi API từng luật.
-Dữ liệu: 公共データ利用規約 (PDL1.0) – phải ghi nguồn 「出典：e-Gov法令検索」.
+Principles (e-Gov publishes no rate limit → self-imposed):
+  * At most 1 request / EGOV_MIN_INTERVAL_SEC (default 1s) for ALL workers – locked on Redis.
+  * Exponential-backoff retry + jitter for 429 / 5xx / timeout, honoring Retry-After.
+  * Cache raw files by revision_id → never re-download a revision already fetched.
+  * Bulk ingest → use bulk download instead of per-law API calls.
+Data: 公共データ利用規約 (PDL1.0) – must credit the source 「出典：e-Gov法令検索」.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 
 class RedisRateLimiter:
-    """Đảm bảo khoảng cách tối thiểu giữa 2 request, dùng chung cho mọi process (SET NX PX)."""
+    """Enforce a minimum gap between 2 requests, shared across all processes (SET NX PX)."""
 
     def __init__(self, redis: Redis | None, key: str, min_interval: float):
         self.redis = redis
@@ -38,7 +38,7 @@ class RedisRateLimiter:
         self._last = 0.0
 
     async def acquire(self) -> None:
-        if self.redis is None:  # fallback trong 1 process (CLI / test)
+        if self.redis is None:  # single-process fallback (CLI / test)
             async with self._local_lock:
                 wait = self._last + self.min_interval_ms / 1000 - time.monotonic()
                 if wait > 0:
@@ -115,7 +115,7 @@ class EgovClient:
         return r.json().get("laws", [])  # type: ignore[union-attr]
 
     async def get_law(self, law_id: str, cache_dir: Path | None = None) -> EgovLaw:
-        """law_id / law_num / law_revision_id đều được."""
+        """Any of law_id / law_num / law_revision_id works."""
         r = await self._get(f"{self.s.egov_api_base}/law_data/{law_id}", {"law_full_text_format": "xml"})
         data = r.json()  # type: ignore[union-attr]
         info, rev = data.get("law_info", {}), data.get("revision_info", {})
@@ -141,7 +141,7 @@ class EgovClient:
     # ---------------- Bulk download ----------------
     async def download_bulk(self, dest: Path, *, category_cd: int | None = None,
                             update_date: str | None = None) -> Path:
-        """file_section=1: toàn bộ; 2: theo category_cd; 3: luật cập nhật theo ngày (YYYYMMDD, ≤3 tháng)."""
+        """file_section=1: all; 2: by category_cd; 3: laws updated on a date (YYYYMMDD, ≤3 months)."""
         if update_date:
             params = {"file_section": 3, "update_date": update_date, "only_xml_flag": "true"}
         elif category_cd is not None:

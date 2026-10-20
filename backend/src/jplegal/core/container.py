@@ -1,4 +1,4 @@
-"""Gom các client dùng chung (API process và worker process mỗi bên giữ 1 instance)."""
+"""Shared clients (the API process and the worker process each hold 1 instance)."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class Container:
 
     @property
     def sparse(self):
-        """BM25 encoder (Sudachi) – nạp lười, dùng chung trong process."""
+        """BM25 encoder (Sudachi) – lazily loaded, shared within the process."""
         from jplegal.retrieval.sparse import get_encoder
 
         s = self.settings

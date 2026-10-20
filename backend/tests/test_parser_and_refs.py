@@ -68,9 +68,9 @@ def test_external_and_alias_refs():
     assert ("L1#1", "労働基準法", "15", Relation.REFERS_TO) in got
     assert ("L1#2", "労働基準法", "36", Relation.REFERS_TO) in got
     assert ("L1#2", "労働契約法", "18", Relation.REFERS_TO) in got
-    # 法第三十二条及び第三十三条 → cả 2 thuộc 労働基準法
+    # 法第三十二条及び第三十三条 → both belong to 労働基準法
     assert ("L1#3", "労働基準法", "33", Relation.APPLIES_MUTATIS_MUTANDIS) in got
-    # dẫn chiếu trong 「」(読み替え) bị bỏ qua
+    # references inside 「」 (読み替え) are skipped
     assert not any(r.src_uid == "L1#4" and r.target_article_key == "12" for r in refs)
 
 

@@ -1,4 +1,4 @@
-"""Client gọi model-server (ruri-v3-310m embedding + ruri-v3-reranker-310m)."""
+"""Client for model-server (ruri-v3-310m embedding + ruri-v3-reranker-310m)."""
 
 from __future__ import annotations
 

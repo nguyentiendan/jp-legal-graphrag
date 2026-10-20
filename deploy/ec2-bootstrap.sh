@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Chạy 1 lần trên EC2 mới (Amazon Linux 2023 hoặc Ubuntu 22.04/24.04):
+# Run once on a new EC2 instance (Amazon Linux 2023 or Ubuntu 22.04/24.04):
 #   curl -fsSL <raw-url>/deploy/ec2-bootstrap.sh | sudo APP_DIR=/opt/jplegal DEPLOY_USER=ec2-user bash
-# Cài Docker Engine + Compose plugin, tạo thư mục app, thêm user deploy vào group docker.
+# Install Docker Engine + Compose plugin, create app directory, add deploy user to docker group.
 # ---------------------------------------------------------------------------
 set -Eeuo pipefail
 
@@ -31,7 +31,7 @@ case "$ID" in
     echo "OS $ID chưa hỗ trợ, cài Docker + Compose plugin thủ công"; exit 1 ;;
 esac
 
-# log rotate mặc định cho mọi container
+# Default log rotate for all containers
 mkdir -p /etc/docker
 if [ ! -f /etc/docker/daemon.json ]; then
   cat > /etc/docker/daemon.json <<'EOF'

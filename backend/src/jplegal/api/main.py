@@ -1,4 +1,4 @@
-"""FastAPI app. Mọi route nằm dưới /api (Nginx proxy /api → service api:8000)."""
+"""FastAPI app. All routes live under /api (Nginx proxies /api → service api:8000)."""
 
 from __future__ import annotations
 

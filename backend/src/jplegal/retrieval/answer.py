@@ -1,4 +1,4 @@
-"""Dựng context + prompt tiếng Nhật, gọi LLM (stream) để sinh câu trả lời có trích dẫn."""
+"""Build Japanese context + prompt, call the LLM (stream) to generate a cited answer."""
 
 from __future__ import annotations
 

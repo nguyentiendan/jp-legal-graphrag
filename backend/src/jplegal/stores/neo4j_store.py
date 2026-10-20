@@ -1,4 +1,4 @@
-"""Neo4j – graph cấu trúc + dẫn chiếu.
+"""Neo4j – structure + reference graph.
 
 (:Law {law_id, title, abbrev, law_type, law_num, revision_id, ...})
 (:Article {uid, law_id, article_key, title, caption, path, text, law_title, order})
@@ -66,7 +66,7 @@ class Neo4jStore:
         ]
         uids = [a["uid"] for a in arts]
         await self._run("MERGE (l:Law {law_id:$law_id}) SET l += $props", law_id=m.law_id, props=law_props)
-        # xoá cạnh dẫn chiếu đi ra (sẽ dựng lại) + NEXT cũ + article không còn tồn tại
+        # drop outgoing reference edges (rebuilt later) + old NEXT + articles that no longer exist
         await self._run(
             f"MATCH (a:Article {{law_id:$law_id}})-[r:{REF_RELS}|NEXT]->() DELETE r", law_id=m.law_id
         )
@@ -94,7 +94,7 @@ class Neo4jStore:
             )
 
     async def link_article_edges(self, rows: list[dict]) -> int:
-        """rows: {src, dst, rel, raw} – dst là Article.uid. Chỉ tạo cạnh khi cả 2 node tồn tại."""
+        """rows: {src, dst, rel, raw} – dst is an Article.uid. Only create an edge when both nodes exist."""
         total = 0
         for rel in (Relation.REFERS_TO, Relation.APPLIES_MUTATIS_MUTANDIS, Relation.DELEGATES_TO):
             part = [r for r in rows if r["rel"] == rel.value]
@@ -175,7 +175,7 @@ class Neo4jStore:
         return {r["uid"]: r for r in rows}
 
     async def subgraph(self, uids: list[str], hops: int = 1, limit: int = 150) -> dict:
-        """Node + cạnh quanh các article (để FE vẽ)."""
+        """Nodes + edges around articles (for FE rendering)."""
         if not uids:
             return {"nodes": [], "edges": []}
         rows = await self._run(

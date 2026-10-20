@@ -1,9 +1,9 @@
-"""Đánh giá retrieval theo mục 7 tài liệu #19: Recall@1/5/10, MRR@10, nDCG@10 (+ All@10 cho câu multi-hop).
+"""Evaluate retrieval per section 7 of doc #19: Recall@1/5/10, MRR@10, nDCG@10 (+ All@10 for multi-hop questions).
 
 queries.jsonl: {"qid": "...", "question": "...", "relevant": ["322AC0000000049#32", ...]}
-    eval/queries.jsonl           – 20 câu "1 điều trả lời được"
-    eval/queries_multihop.jsonl  – 38 câu cần 2–3 điều (luật + 施行規則/政令 được uỷ quyền, điều dẫn chiếu)
-All@10 = tỉ lệ câu hỏi mà *mọi* điều cần thiết đều nằm trong top 10.
+    eval/queries.jsonl           – 20 single-article questions
+    eval/queries_multihop.jsonl  – 38 questions needing 2–3 articles (law + delegated 施行規則/政令, cited articles)
+All@10 = share of questions where *all* needed articles are in the top 10.
 """
 
 from __future__ import annotations

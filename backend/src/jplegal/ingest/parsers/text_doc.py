@@ -1,7 +1,7 @@
-"""Parser cho file upload không phải XML e-Gov: PDF / DOCX / TXT / MD.
+"""Parser for non-e-Gov-XML uploads: PDF / DOCX / TXT / MD.
 
-Tách điều theo dòng bắt đầu bằng 「第◯条」; caption là dòng 「（…）」 ngay phía trên.
-Nếu không tìm thấy 条 nào → chia theo đoạn (~max_chars) thành pseudo-article c1, c2, ...
+Split articles by lines starting with 「第◯条」; the caption is the 「（…）」 line right above.
+If no 条 is found → split by paragraph (~max_chars) into pseudo-articles c1, c2, ...
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def parse_text_document(text: str, law_id: str, title: str, max_chars: int = 150
         if m:
             flush_para(buf, label, pnum)
             key = article_key_from_title(m.group(1)) or f"x{len(articles)}"
-            if key in seen_keys:  # trùng số điều (vd. 附則) → thêm hậu tố
+            if key in seen_keys:  # duplicate article number (e.g. 附則) → append suffix
                 seen_keys[key] += 1
                 key = f"{key}-{seen_keys[key]}"
             else:
@@ -86,11 +86,11 @@ def parse_text_document(text: str, law_id: str, title: str, max_chars: int = 150
             pnum += 1
             buf, label = [pm.group(2)], pm.group(1)
             continue
-        if current is not None:  # đoạn mở đầu trước 第一条 bị bỏ qua
+        if current is not None:  # leading text before 第一条 is skipped
             buf.append(ln)
     flush_para(buf, label, pnum)
 
-    if not articles:  # không có cấu trúc 条 → chia đoạn
+    if not articles:  # no 条 structure → split by paragraph
         body = "\n".join(lines)
         paras = [p.strip() for p in re.split(r"\n\s*\n|(?<=。)\n", body) if p.strip()]
         group: list[str] = []

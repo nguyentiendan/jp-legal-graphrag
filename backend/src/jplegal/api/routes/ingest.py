@@ -53,7 +53,7 @@ async def upload(request: Request, file: UploadFile = File(...), title: str | No
 
 class EgovRequest(BaseModel):
     law_ids: list[str] = Field(default_factory=list, description="law_id / law_num / law_revision_id", max_length=50)
-    titles: list[str] = Field(default_factory=list, description="Tên luật chính xác, vd. 労働基準法", max_length=50)
+    titles: list[str] = Field(default_factory=list, description="Exact law name, e.g. 労働基準法", max_length=50)
 
 
 @router.post("/egov")
@@ -61,7 +61,7 @@ async def ingest_egov(request: Request, body: EgovRequest) -> dict:
     c = request.app.state.c
     law_ids = [x.strip() for x in body.law_ids if x.strip()]
     unresolved = []
-    for t in body.titles:  # resolve tên → law_id (cũng đi qua rate limiter)
+    for t in body.titles:  # resolve name → law_id (also goes through the rate limiter)
         hits = await c.egov.search_laws(t.strip(), limit=10)
         exact = [h for h in hits if h.get("revision_info", {}).get("law_title") == t.strip()]
         if exact:
@@ -77,7 +77,7 @@ async def ingest_egov(request: Request, body: EgovRequest) -> dict:
 
 
 class BulkRequest(BaseModel):
-    zip_path: str | None = Field(None, description="Đường dẫn zip đã đặt sẵn trong DATA_DIR (môi trường air-gapped)")
+    zip_path: str | None = Field(None, description="Path of a zip already placed in DATA_DIR (air-gapped environments)")
     category_cd: int | None = None
     update_date: str | None = Field(None, pattern=r"^\d{8}$")
     law_ids: list[str] = Field(default_factory=list)

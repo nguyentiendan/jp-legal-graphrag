@@ -1,4 +1,4 @@
-"""Quản lý ingest job (PostgreSQL) + enqueue vào arq (Redis)."""
+"""Manage ingest jobs (PostgreSQL) + enqueue into arq (Redis)."""
 
 from __future__ import annotations
 

@@ -1,17 +1,17 @@
-"""BM25 sparse vector cho tiếng Nhật: Sudachi tách từ → sparse vector lưu trong Qdrant.
+"""BM25 sparse vectors for Japanese: Sudachi tokenization → sparse vectors stored in Qdrant.
 
-Qdrant tự tính IDF khi sparse vector được khai báo `modifier=idf`, nên ở đây chỉ cần:
-  - tài liệu: trọng số tf của BM25   tf·(k1+1) / (tf + k1·(1 − b + b·|d|/avgdl))
-  - câu hỏi:  mỗi từ (không trùng) trọng số 1.0
-→ điểm Qdrant = Σ IDF(t) · w_doc(t) · w_query(t) = BM25.
+Qdrant computes IDF itself when the sparse vector is declared with `modifier=idf`, so here we only need:
+  - documents: BM25 tf weights   tf·(k1+1) / (tf + k1·(1 − b + b·|d|/avgdl))
+  - questions:  each unique term with weight 1.0
+→ Qdrant score = Σ IDF(t) · w_doc(t) · w_query(t) = BM25.
 
-Tách từ (Sudachi, từ điển core):
-  - Chuẩn hoá trước: NFKC, số kanji trước 条/項/号/… và sau 第 → số Ả Rập ("第三十七条" → "第37条"),
-    vì Sudachi tách "三十七条" thành "三" + "十七条".
-  - Đa độ mịn: lấy token SplitMode.C (vd. 割増賃金, 年次有給休暇) và thêm các token SplitMode.A bên trong
-    (割増, 賃金) → câu hỏi dùng từ ghép hay từ đơn đều khớp.
-  - Dùng normalized_form (支払/支払い → 支払い, 36協定 → 三六協定), bỏ trợ từ / trợ động từ / ký hiệu.
-  - Token → chỉ số uint32 bằng hash ổn định (blake2b), không cần lưu từ điển.
+Tokenization (Sudachi, core dict):
+  - Pre-normalize: NFKC, kanji numerals before 条/項/号/… and after 第 → Arabic digits ("第三十七条" → "第37条"),
+    because Sudachi splits "三十七条" into "三" + "十七条".
+  - Multi-granular: take SplitMode.C tokens (e.g. 割増賃金, 年次有給休暇) plus inner SplitMode.A tokens
+    (割増, 賃金) → questions match whether they use compounds or single words.
+  - Use normalized_form (支払/支払い → 支払い, 36協定 → 三六協定), drop particles / auxiliaries / symbols.
+  - Token → stable uint32 index via hash (blake2b), no dictionary to store.
 """
 
 from __future__ import annotations
@@ -65,9 +65,9 @@ class SparseVec:
 
 
 class JapaneseTokenizer:
-    """Sudachi tokenizer – thread-safe bằng lock (đối tượng tokenizer của Sudachi không chia sẻ được giữa thread)."""
+    """Sudachi tokenizer – thread-safe via lock (Sudachi tokenizer objects can't be shared across threads)."""
 
-    # Sudachi giới hạn độ dài input (~49 KB); văn bản luật dài được chia theo câu
+    # Sudachi caps input length (~49 KB); long law text is split by sentence
     MAX_CHARS = 8000
 
     def __init__(self, dict_name: str = "core", multi_granular: bool = True):
@@ -142,7 +142,7 @@ class BM25Encoder:
 
 
 def doc_text_for_sparse(law_title: str, article_title: str, caption: str, text: str) -> str:
-    """Văn bản dùng để tính BM25: tên luật + số điều + 見出し + nội dung."""
+    """Text used for BM25: law name + article number + 見出し + body."""
     return f"{law_title} {article_title} {caption or ''}\n{text}"
 
 

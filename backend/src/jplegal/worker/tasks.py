@@ -1,6 +1,6 @@
-"""arq worker – chạy ingest nền.
+"""arq worker – runs ingest in the background.
 
-Khởi động:  arq jplegal.worker.tasks.WorkerSettings
+Start:  arq jplegal.worker.tasks.WorkerSettings
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ async def task_ingest_upload(ctx: dict, job_id: str) -> dict:
 
 
 async def task_ingest_egov(ctx: dict, job_id: str) -> dict:
-    """params: {law_ids: [...]} – mỗi luật 1 request API (đã rate-limit)."""
+    """params: {law_ids: [...]} – 1 API request per law (rate-limited)."""
 
     async def fn(c: Container, job: IngestJob, progress):
         law_ids: list[str] = job.params.get("law_ids", [])
@@ -160,7 +160,7 @@ async def task_rebuild_links(ctx: dict, job_id: str) -> dict:
 
 
 async def cron_daily_update(ctx: dict) -> None:
-    """Hằng ngày: tải bulk 'luật cập nhật hôm qua', chỉ re-ingest luật đã có trong hệ thống."""
+    """Daily: download bulk 'laws updated yesterday', only re-ingest laws already in the system."""
     c: Container = ctx["c"]
     if not c.settings.enable_daily_update:
         return
