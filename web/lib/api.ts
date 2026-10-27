@@ -24,6 +24,7 @@ export interface RetrievedItem {
   graph_via: { from: string; rel: string; direction: string }[];
   rrf_score: number;
   rerank_score: number | null;
+  relevance_noul: number | null;
 }
 
 export interface GraphNode {
@@ -50,6 +51,8 @@ export interface RetrievalResult {
   items: RetrievedItem[];
   timings_ms: Record<string, number>;
   subgraph: Subgraph | null;
+  intent?: "rag_query" | "greeting" | "out_of_scope";
+  message?: string;
 }
 
 export interface Job {
@@ -158,10 +161,19 @@ export interface AskBody {
   top_k?: number | null;
 }
 
+export interface AnswerGuard {
+  unsupported: string[];
+  warnings: string[];
+}
+
 export interface AskHandlers {
   onRetrieval: (r: RetrievalResult) => void;
   onToken: (t: string) => void;
-  onDone: (d: { answer: string; citations: { n: number; uid: string; citation: string; caption: string }[] }) => void;
+  onDone: (d: {
+    answer: string;
+    citations: { n: number; uid: string; citation: string; caption: string }[];
+    guard?: AnswerGuard;
+  }) => void;
   onError: (msg: string) => void;
 }
 

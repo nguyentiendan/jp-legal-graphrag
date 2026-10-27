@@ -178,6 +178,7 @@ client.create_collection(
 
 ## 6. Retrieval
 
+0. **Intent (Jev Choice)**, trước retrieval: `greeting` / `rag_query` / `out_of_scope`. Chào hỏi và ngoài phạm vi trả lời cố định, không search. Confidence < `JEV_INTENT_MIN_CONFIDENCE` → coi như `rag_query`. Không có `TYPESAFE_API_KEY` → fail-open vào RAG.
 1. Embed query (`検索クエリ: ` + câu hỏi) và tách từ query bằng Sudachi → sparse vector.
 2. **First stage (Qdrant)**, `HYBRID_FUSION=dbsf` (mặc định): 1 request `query_points` với 2 `prefetch` (dense và bm25, mỗi nhánh top-60 chunk = `DENSE_TOP_K`×3) + `FusionQuery(DBSF)` → top-20 điều (gộp chunk theo article, lấy max), filter `law_id` nếu user chọn. Tắt BM25 (`SPARSE_ENABLED=false` / ô trên UI) hoặc collection chưa có sparse → chỉ dense. Hai nhánh cũng được chạy riêng (song song) để gắn nhãn nguồn và hạng `dense#` / `bm25#`.
 3. **Graph expansion (Neo4j)**: từ top-5 seed → 1-hop `REFERS_TO` (2 chiều), `APPLIES_MUTATIS_MUTANDIS`, `DELEGATES_TO`. Chỉ giữ các điều **chưa nằm trong top `FINAL_K`** (v0.4; trước đó là "chưa có trong top-20" nên không kéo được điều hạng 11–20 lên); node `Law` được uỷ quyền (施行令/施行規則) → dense search giới hạn trong luật đó. Rank ứng viên theo cosine với query, giữ ≤10.
@@ -186,9 +187,11 @@ client.create_collection(
    - Có rerank: pool = first stage top-`RERANK_TOP_N` ∪ graph candidates → `ruri-v3-reranker-310m` quyết định thứ tự → top-6.
    - `FUSION_MODE=rrf` vẫn giữ để so sánh (weighted RRF k=60, w_dense=1.0, w_graph=0.5).
 5. **Context**: mỗi điều kèm `法令名 第◯条（見出し）`.
-6. **Generate** (LiteLLM, stream SSE): bắt buộc trích dẫn `[労働基準法 第32条]`; cho phép 「根拠が見つかりません」. Không cấu hình LLM → chỉ trả retrieval.
+6. **Relevance (Jev Noul)**, sau retrieval, tách khỏi intent: một yes/no cho từng điều. Dưới `JEV_RELEVANCE_MIN_NOUL` thì không đưa vào LLM; UI vẫn hiện `relevance_noul`.
+7. **Generate** (LiteLLM, stream SSE): bắt buộc trích dẫn `[労働基準法 第32条]`; cho phép 「根拠が見つかりません」. Không cấu hình LLM → chỉ trả retrieval.
+8. **Guardrail rule-based** trên câu trả lời: đối chiếu `[法令名 第◯条]` với điều đã retrieve, cảnh báo thiếu trích dẫn / trích điều không có trong context, luôn gắn disclaimer.
 
-Response: `/api/search` trả JSON; `/api/ask` stream SSE `retrieval` → `token`… → `done` (`answer`, `citations`). Mỗi item có `sources` (dense/sparse/graph), rank/score từng nhánh, `graph_via` (đi qua cạnh nào), `rerank_score`; kèm `subgraph` để FE vẽ.
+Response: `/api/search` trả JSON; `/api/ask` stream SSE `retrieval` → `token`… → `done` (`answer`, `citations`, `guard`). Mỗi item có `sources` (dense/sparse/graph), rank/score từng nhánh, `graph_via`, `rerank_score`, `relevance_noul`; kèm `subgraph` để FE vẽ.
 
 ### 6.1 Kết quả đo P0 (20 câu hỏi `eval/queries.jsonl`, 3 luật: 労基法, 施行規則, 労契法)
 
@@ -278,7 +281,7 @@ jp-legal-graphrag/
 | Phase | Nội dung |
 |---|---|
 | **P0 – MVP** (đang làm) | Ingest e-Gov API / bulk XML / upload; graph cấu trúc + dẫn chiếu + 準用 + 委任; Qdrant dense + Neo4j expand + slots/rerank; `/ask` streaming; Next.js (hỏi đáp, nạp dữ liệu, tiến trình, xem luật/điều + graph); Docker on-prem; bộ eval 20 câu |
-| **P1** (đang làm) | ✔ Eval multi-hop (38 câu) + sửa graph expansion; ✔ sparse BM25 (Sudachi) trong Qdrant, fusion DBSF; ☐ query rewrite 口語 → 法律用語 (LLM); ☐ dẫn chiếu cấp 項・号; ☐ upload PDF/DOCX ổn định |
+| **P1** (đang làm) | ✔ Eval multi-hop (38 câu) + sửa graph expansion; ✔ sparse BM25 (Sudachi) trong Qdrant, fusion DBSF; ✔ Jev intent (Choice) + relevance (Noul); ✔ guardrail trích dẫn rule-based; ☐ query rewrite 口語 → 法律用語 (LLM); ☐ dẫn chiếu cấp 項・号; ☐ upload PDF/DOCX ổn định |
 | **P2** | LLM extraction có kiểm soát: 定義語 (`:Term`, `DEFINES`), 主体, khái niệm pháp lý; trang review graph |
 | **P3** | Leiden community + community report → nhánh community retrieval / global search |
 | **P4** | Versioning theo 改正/施行日, 判例/通達, auth, Langfuse, LiteLLM Proxy |

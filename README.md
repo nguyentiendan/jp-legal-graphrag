@@ -65,7 +65,10 @@
 - **ハイブリッド検索**: Dense（Ruri v3）＋ BM25（Sudachi形態素解析、Qdrantのsparse vector）を1回のQdrantリクエストで実行し、DBSFで融合
 - **Graph展開**: 上位の条文から1ホップの引用・準用・委任関係をNeo4jで辿り、関連条文を補完
 - **リランク**: Ruri v3リランカー（cross-encoder）で最終順位を決定
+- **意図分類（Jev Choice）**: 質問の前に TypeSafe Jev で `greeting` / `rag_query` / `out_of_scope` を判定。挨拶・法令外は検索せず固定返信。`TYPESAFE_API_KEY` 未設定時は RAG へフォールバック
+- **条文関連度（Jev Noul）**: 検索後に各条文へ独立の yes/no。閾値未満は LLM の根拠から除外。画面には `relevance_noul` を表示
 - **根拠付き回答生成**: LiteLLM経由でLLMを呼び出し、`[労働基準法 第32条]` のような出典付きで回答をストリーミング表示（SSE）。LLM未設定時は検索結果のみを返却
+- **出力ガードレール（規則ベース）**: 回答中の `[法令名 第◯条]` を検索結果と照合。未引用・根拠外の引用を警告し、免責文を必ず付与
 - **法令の取り込み**: e-Gov 法令API、e-Gov XML一括ダウンロード（ZIP）、ファイルアップロード（XML / PDF / DOCX / TXT）の3経路に対応。取り込みはジョブキューで非同期実行
 - **法令・条文ブラウザ**: 取り込み済み法令の一覧・条文表示、関連グラフの可視化
 - **検索評価**: Recall@k / MRR@10 / nDCG@10 / All@10 を構成別（dense / bm25 / hybrid / +graph / +rerank）に測定する評価基盤を内蔵
@@ -137,16 +140,26 @@
 ## 検索パイプライン（Retrieval）
 
 ```text
-質問 ─┬─► Dense検索（Ruri v3）        ─┐ Qdrantへ1リクエストで2件のprefetchを実行し
-      └─► BM25検索（Sudachi、sparse） ─┘ DBSF融合（HYBRID_FUSION） ─► seed ─► Graph展開（Neo4j） ─► リランク ─► LLM
+質問 ─► Jev Choice（intent）
+         greeting / out_of_scope ─► 固定返信（検索しない）
+         rag_query ─┬─► Dense検索（Ruri v3）        ─┐ Qdrantへ1リクエストで2件のprefetch
+                    └─► BM25検索（Sudachi、sparse） ─┘ DBSF ─► seed ─► Graph ─► リランク
+                                                                                 │
+                                                                                 ▼
+                                                              Jev Noul（条文ごと関連度）─► LLM ─► 引用ガード
 ```
 
+0. **意図分類（Jev Choice）**: `greeting` / `rag_query` / `out_of_scope`。挨拶と法令外は固定返信。
 1. **埋め込みと形態素解析**: 質問文に `検索クエリ: ` を付けて埋め込みベクトルを生成し、並行してSudachiで形態素解析してBM25用のsparseベクトルを作ります。
 2. **第1段階（Qdrantハイブリッド検索）**: denseとbm25の2つのprefetchを1回の `query_points` リクエストで実行し、DBSF（デフォルト）またはRRFで融合して上位の条文を取得します。各条文には Dense / BM25 / Graph のどの経路で見つかったか（出典ラベル）と経路別の順位・スコアが付きます。
 3. **Graph展開（Neo4j）**: 上位5件（seed）から、引用（`REFERS_TO`、双方向）、準用（`APPLIES_MUTATIS_MUTANDIS`）、委任（`DELEGATES_TO`）を1ホップ辿ります。委任先が施行令・施行規則などの法令ノードの場合は、その法令に絞ったdense検索を行います。最終結果（`FINAL_K`）に既に含まれる条文は重複して追加しません。
 4. **融合（Fusion）**: リランクなしの場合は **slots方式**（denseの結果を主とし、グラフ由来の新規条文を最大 `GRAPH_SLOTS` 件まで追加）。リランクありの場合は「第1段階の上位 ∪ グラフ候補」をリランカーに渡します。比較用にRRF方式（`FUSION_MODE=rrf`）も残しています。
 5. **リランク**: Ruri v3リランカーで候補を再順位付けし、最終的に上位 `FINAL_K` 件を根拠条文とします。
-6. **回答生成**: 根拠条文を `法令名 第◯条（見出し）` 付きでLLMに渡し、出典引用を必須として回答をSSEでストリーミングします。根拠が見つからない場合はその旨を回答させるプロンプト（`backend/prompts/answer_ja.txt`）を使用します。LLMが未設定の場合は検索結果のみを返します。
+6. **条文関連度（Jev Noul）**: 各条文について「この条文は質問の根拠になるか」を独立に判定。`JEV_RELEVANCE_MIN_NOUL` 未満は生成コンテキストから外します（一覧には残し、スコアを表示）。
+7. **回答生成**: 関連度を満たした条文を `法令名 第◯条（見出し）` 付きでLLMに渡し、出典引用を必須として回答をSSEでストリーミングします。
+8. **出力ガードレール**: 生成後に引用括弧を検索結果と照合し、未引用・根拠外引用を警告、免責文を付与します。
+
+質問が挨拶や法令外と判定された場合は 1〜8 をスキップします。Jev の Choice の信頼度が `JEV_INTENT_MIN_CONFIDENCE` 未満のときは `rag_query` 扱いにして検索します。
 
 **BM25の仕組み**
 
@@ -246,8 +259,8 @@ client.create_collection(
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /api/health`、`GET /api/status` | ヘルスチェックとLLM等の設定状態 |
-| `POST /api/search` | 検索のみ（JSONで根拠条文とサブグラフを返却） |
-| `POST /api/ask` | 検索＋回答生成（SSEストリーミング：`retrieval` → `token` … → `done`） |
+| `POST /api/search` | 意図分類のあと検索のみ（JSONで根拠条文・`relevance_noul`・サブグラフを返却。挨拶等は `intent` と固定文） |
+| `POST /api/ask` | 意図分類＋検索＋関連度＋回答生成（SSE：`retrieval` → `token` … → `done`。`done` に `guard`） |
 | `POST /api/ingest/upload`、`POST /api/ingest/egov`、`POST /api/ingest/bulk`、`POST /api/ingest/rebuild-links` | ファイル取り込み、e-Gov取り込み、ZIP一括取り込み、グラフリンク再構築 |
 | `GET /api/jobs`、`GET /api/jobs/{job_id}` | ジョブ一覧・詳細 |
 | `GET /api/laws`、`GET /api/laws/{law_id}`、`GET /api/articles/graph`、`GET /api/graph/stats` | 法令・条文・グラフの取得 |
@@ -368,6 +381,7 @@ LLM_API_KEY=my-secret
 | 公開ポート | `WEB_BIND`、`WEB_PORT` | Nginxの待ち受けアドレスとポート（デフォルト `0.0.0.0:8080`） |
 | 認証情報 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`、`NEO4J_PASSWORD` | **本番では必ず変更**。Neo4jのヒープ／ページキャッシュは `NEO4J_HEAP`、`NEO4J_PAGECACHE` |
 | LLM | `OLLAMA_MODEL`、`LLM_MODEL`、`LLM_API_BASE`、`LLM_API_KEY`、`LLM_NUM_CTX`、`LLM_TIMEOUT` | LiteLLM経由の回答生成設定。`LLM_MODEL` が空なら検索のみ |
+| Jev（TypeSafe） | `TYPESAFE_API_KEY`、`TYPESAFE_API_BASE`、`JEV_MODEL`、`JEV_TIMEOUT`、`JEV_INTENT_MIN_CONFIDENCE`、`JEV_RELEVANCE_ENABLED`、`JEV_RELEVANCE_MIN_NOUL` | 意図分類（Choice）と条文関連度（Noul）。キー未設定時は検索へフォールバック |
 | モデルサーバー | `MODEL_DEVICE`、`MAX_SEQ_LENGTH`、`HF_HUB_OFFLINE`、`PRELOAD_MODELS` | デバイス選択（空なら自動）、最大系列長、オフライン動作、ビルド時のモデル同梱 |
 | 検索 | `DENSE_TOP_K`、`SEED_K`、`GRAPH_MAX`、`GRAPH_SLOTS`、`FUSION_MODE`、`FINAL_K` | 第1段階の取得件数、グラフ展開のseed数と上限、融合方式、最終件数 |
 | リランク | `RERANK_ENABLED`、`RERANK_TOP_N`、`RERANK_MAX_CHARS` | リランクの有効化、対象件数、1件あたりの最大文字数 |
@@ -440,9 +454,9 @@ backend/                 Python 3.12（uv）、パッケージ jplegal
     api/                 FastAPIルート（/api/ingest、/api/jobs、/api/laws、/api/search、/api/ask SSE）
     worker/              arqタスク
     ingest/              e-Gov XML / PDF / DOCXパーサー、chunker、引用抽出、リンカー
-    retrieval/           dense + BM25（Sudachi、Qdrantハイブリッド）+ graph展開 → 融合 → リランク → LLM
+    retrieval/           intent（Jev）+ dense/BM25 + graph → 融合 → リランク → relevance（Jev）→ LLM → guardrails
     stores/              Qdrant、Neo4j
-    clients/             e-Gov API（レート制限）、model-server、LiteLLM
+    clients/             e-Gov API（レート制限）、model-server、LiteLLM、Jev（TypeSafe）
     db/                  SQLAlchemyモデル（PostgreSQL）
     core/                設定（環境変数）、共通モデル、コンテナ
   config/laws.yaml       サンプル法令リスト
@@ -490,7 +504,7 @@ GitHub ActionsによるCI（プルリクエスト時）、GHCRへのイメージ
 | フェーズ | 内容 |
 |---|---|
 | **P0（完了）** | e-Gov API / 一括XML / アップロードによる取り込み、構造・引用・準用・委任のグラフ、Qdrant dense＋Neo4j展開＋slots／リランク、`/ask` ストリーミング、Next.js画面（質問応答、取り込み、進捗、法令・条文とグラフ表示）、Dockerオンプレミス構成、評価セット20問 |
-| **P1（進行中）** | ✔ multi-hop評価セット（38問）＋グラフ展開の修正　✔ Qdrant内BM25（Sudachi）、DBSF融合　☐ 口語→法律用語へのクエリ書き換え（LLM）　☐ 項・号レベルの引用　☐ PDF / DOCXアップロードの安定化 |
+| **P1（進行中）** | ✔ multi-hop評価セット（38問）＋グラフ展開の修正　✔ Qdrant内BM25（Sudachi）、DBSF融合　✔ Jev 意図分類（Choice）＋条文関連度（Noul）　✔ 規則ベースの引用ガードレール　☐ 口語→法律用語へのクエリ書き換え（LLM）　☐ 項・号レベルの引用　☐ PDF / DOCXアップロードの安定化 |
 | **P2** | LLM抽出の管理付き導入：定義語（`:Term`、`DEFINES`）、主体、法的概念。グラフのレビュー画面 |
 | **P3** | Leidenコミュニティ＋コミュニティレポートによるグローバル検索 |
 | **P4** | 改正・施行日に基づくバージョン管理、判例・通達、認証、Langfuse、LiteLLM Proxy |
@@ -503,6 +517,8 @@ GitHub ActionsによるCI（プルリクエスト時）、GHCRへのイメージ
 - QdrantとNeo4jの同期は、共通キー `uid` を使う取り込みパイプライン経由でのみ行います。再構築用のコマンド（`rebuild-links`、`reindex-sparse`）も用意しています。
 - 日本語PDF（縦書き、スキャン画像）は未対応です。テキストレイヤーを持つPDFのみを対象としています。
 - 評価セットは自作のため偏りがあり得ます。実利用者の質問を取り込んで拡充していく想定です。
+- 出力ガードレールは引用の有無と免責文までです。正しい条文を引きつつ内容を誤って要約するケースは検知しません。
+- Jev は外部 API です。エアギャップ環境では `TYPESAFE_API_KEY` を空のままにし、すべての質問が RAG に入ります。
 
 ---
 

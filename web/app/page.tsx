@@ -4,16 +4,23 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { GraphView } from "@/components/GraphView";
 import { Button, Card, cx, Empty, ErrorBox, Skeleton, SourceBadge, Textarea } from "@/components/ui";
-import { api, ask, type Law, type RetrievalResult, type RetrievedItem } from "@/lib/api";
+import { api, ask, type AnswerGuard, type Law, type RetrievalResult, type RetrievedItem } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
-function AnswerText({ text, streaming }: { text: string; streaming: boolean }) {
-  const parts = text.split(/(\[[^\]\n]{2,60}\])/g);
+function AnswerText({ text, streaming, unsupported }: { text: string; streaming: boolean; unsupported: string[] }) {
+  const parts = text.split(/(\[[^\]\n]{2,120}\])/g);
+  const bad = new Set(unsupported);
   return (
     <div className={cx("answer-text text-[15px]", streaming && "caret")}>
       {parts.map((p, i) =>
         /^\[[^\]]+\]$/.test(p) ? (
-          <span key={i} className="mx-0.5 rounded bg-ai-soft px-1 py-0.5 text-[13px] font-medium text-ai">
+          <span
+            key={i}
+            className={cx(
+              "mx-0.5 rounded px-1 py-0.5 text-[13px] font-medium",
+              bad.has(p.slice(1, -1).trim()) ? "bg-[color-mix(in_srgb,var(--bad)_15%,transparent)] text-bad" : "bg-ai-soft text-ai",
+            )}
+          >
             {p.slice(1, -1)}
           </span>
         ) : (
@@ -68,6 +75,11 @@ function EvidenceItem({ it, n }: { it: RetrievedItem; n: number }) {
         )}
         <span>fusion {it.rrf_score.toFixed(3)}</span>
         {it.rerank_score !== null && <span>rerank {it.rerank_score.toFixed(3)}</span>}
+        {it.relevance_noul != null && (
+          <span className={it.relevance_noul < 0.5 ? "text-bad" : undefined}>
+            {t("ask.jevRelevance")} {it.relevance_noul.toFixed(2)}
+          </span>
+        )}
       </div>
     </li>
   );
@@ -83,6 +95,7 @@ export default function AskPage() {
   const [lawFilter, setLawFilter] = useState<string[]>([]);
   const [retrieval, setRetrieval] = useState<RetrievalResult | null>(null);
   const [answer, setAnswer] = useState("");
+  const [guard, setGuard] = useState<AnswerGuard | null>(null);
   const [phase, setPhase] = useState<"idle" | "retrieving" | "answering" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -98,12 +111,19 @@ export default function AskPage() {
     abort.current = ctl;
     setError(null);
     setAnswer("");
+    setGuard(null);
     setRetrieval(null);
     setPhase("retrieving");
     const body = { query, use_graph: useGraph, use_rerank: useRerank, use_sparse: useSparse, law_ids: lawFilter.length ? lawFilter : null };
     try {
       if (searchOnly) {
-        setRetrieval(await api.search(body));
+        const found = await api.search(body);
+        if (found.intent && found.intent !== "rag_query") {
+          setAnswer(found.message ?? "");
+          setPhase("done");
+          return;
+        }
+        setRetrieval(found);
         setPhase("done");
         return;
       }
@@ -116,7 +136,8 @@ export default function AskPage() {
           },
           onToken: (tok) => setAnswer((a) => a + tok),
           onDone: (d) => {
-            setAnswer((a) => a || d.answer);
+            setAnswer(d.answer);
+            setGuard(d.guard ?? null);
             setPhase("done");
           },
           onError: (m) => {
@@ -199,8 +220,15 @@ export default function AskPage() {
         {(answer || phase === "answering") && (
           <Card className="p-5">
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">{t("ask.answer")}</h2>
+            {phase === "done" && guard && guard.warnings.length > 0 && (
+              <ul className="mb-3 space-y-1 rounded-md border border-bad/30 bg-[color-mix(in_srgb,var(--bad)_8%,transparent)] px-3 py-2 text-sm text-bad">
+                {guard.warnings.map((w) => (
+                  <li key={w}>{t(w === "unsupported_citation" ? "ask.guard.unsupported" : "ask.guard.missing")}</li>
+                ))}
+              </ul>
+            )}
             {answer ? (
-              <AnswerText text={answer} streaming={phase === "answering"} />
+              <AnswerText text={answer} streaming={phase === "answering"} unsupported={guard?.unsupported ?? []} />
             ) : (
               <div className="space-y-2">
                 <Skeleton className="h-4 w-11/12" />

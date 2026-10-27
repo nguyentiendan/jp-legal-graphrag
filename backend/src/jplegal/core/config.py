@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     # Ollama defaults to a 2048-token context → prompts (6 articles) get cut. 0 = don't send.
     llm_num_ctx: int = 16384
 
+    # ---- Jev (TypeSafe System One) – intent Choice, then separate Noul relevance ----
+    typesafe_api_key: str = ""
+    typesafe_api_base: str = "https://api.typesafe.ai/v1"
+    jev_model: str = "jev-latest"
+    jev_timeout: float = 20.0
+    jev_intent_min_confidence: float = 0.5
+    jev_relevance_enabled: bool = True
+    jev_relevance_min_noul: float = 0.5
+
     # ---- e-Gov 法令API ----
     egov_api_base: str = "https://laws.e-gov.go.jp/api/2"
     egov_bulk_url: str = "https://laws.e-gov.go.jp/bulkdownload"

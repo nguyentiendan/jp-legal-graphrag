@@ -55,6 +55,7 @@ class RetrievedArticle:
     graph_via: list[dict] = field(default_factory=list)  # [{from, rel}]
     rrf_score: float = 0.0
     rerank_score: float | None = None
+    relevance_noul: float | None = None
 
     @property
     def citation(self) -> str:

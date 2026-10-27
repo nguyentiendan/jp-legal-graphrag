@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from redis.asyncio import Redis
 
 from jplegal.clients.egov import EgovClient
+from jplegal.clients.jev import JevClient
 from jplegal.clients.llm import LLMClient
 from jplegal.clients.model_server import ModelServerClient
 from jplegal.core.config import Settings, get_settings
@@ -25,6 +26,7 @@ class Container:
     neo4j: Neo4jStore
     models: ModelServerClient
     llm: LLMClient
+    jev: JevClient
     egov: EgovClient
 
     @classmethod
@@ -40,6 +42,7 @@ class Container:
             neo4j=Neo4jStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database),
             models=ModelServerClient(s),
             llm=LLMClient(s),
+            jev=JevClient(s),
             egov=EgovClient(s, redis),
         )
         if init_schema:
@@ -67,6 +70,7 @@ class Container:
 
     async def close(self) -> None:
         await self.egov.close()
+        await self.jev.close()
         await self.models.close()
         await self.qdrant.close()
         await self.neo4j.close()
