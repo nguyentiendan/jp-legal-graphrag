@@ -191,14 +191,14 @@ class QdrantStore:
 
     async def _migrate_schema(self, progress) -> None:
         tmp = f"{self.collection}__migrate"
-        log.warning("Qdrant: collection %s chưa có sparse vector – chuyển sang schema mới (qua %s)", self.collection, tmp)
+        log.warning("Qdrant: collection %s has no sparse vector – migrating schema (via %s)", self.collection, tmp)
         if await self.client.collection_exists(tmp):
             await self.client.delete_collection(tmp)
         await self._create(tmp)
-        await self._copy(self.collection, tmp, progress, "chép sang collection tạm")
+        await self._copy(self.collection, tmp, progress, "copy to temp collection")
         await self.client.delete_collection(self.collection)
         await self._create(self.collection)
-        await self._copy(tmp, self.collection, progress, "chép về collection mới")
+        await self._copy(tmp, self.collection, progress, "copy back to new collection")
         await self.client.delete_collection(tmp)
         self._has_sparse = True
 

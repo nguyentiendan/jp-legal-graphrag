@@ -12,6 +12,19 @@ from typing import Any, Protocol
 from jplegal.retrieval.pipeline import RetrievedArticle
 
 _MAX_CHARS = 800
+# Statutory exceptions (ただし書) and delegation clauses (政令で定める) usually sit
+# at the end of an article, so truncation keeps the tail, not just the head.
+_HEAD_CHARS = 500
+_TAIL_CHARS = 300
+
+
+def truncate_for_noul(text: str, max_chars: int = _MAX_CHARS) -> str:
+    """Truncate long articles to head + tail so closing exceptions survive."""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    head = max(0, max_chars - _TAIL_CHARS)
+    return text[:head] + "\n（中略）\n" + text[-_TAIL_CHARS:]
 
 
 class JevLike(Protocol):
@@ -33,7 +46,7 @@ def _noul_question(article: RetrievedArticle) -> dict:
             "question": "Does `article` provide a legal basis that can answer `query`?",
             "article": {
                 "citation": article.citation,
-                "text": article.text[:_MAX_CHARS],
+                "text": truncate_for_noul(article.text),
             },
         },
         "criteria": {

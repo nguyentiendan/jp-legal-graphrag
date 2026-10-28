@@ -50,14 +50,34 @@ def article_key_from_title(title: str) -> str | None:
     return "_".join(parts)
 
 
+_SUPPL_RE = re.compile(r"^suppl\d+_(.*)$")
+_PSEUDO_RE = re.compile(r"^[cx](\d+)$")  # upload chunks without 条 structure (text_doc.py)
+_DUP_SUFFIX_RE = re.compile(r"^(.*)-(\d+)$")  # duplicate article numbers in uploads: "32-1" = 2nd 第32条
+
+
+def _display_plain(key: str) -> str:
+    head, *rest = key.split("_")
+    return f"第{head}条" + "".join(f"の{r}" for r in rest)
+
+
 def display_article(article_key: str) -> str:
     """'32_2' -> '第32条の2' (for display / citation)."""
-    if article_key.startswith("suppl"):
-        return f"附則 {article_key}"
-    if article_key.startswith("c"):
-        return f"[{article_key}]"
-    head, *rest = article_key.split("_")
-    return f"第{head}条" + "".join(f"の{r}" for r in rest)
+    if article_key == "main":
+        return "本則"
+    dup = _DUP_SUFFIX_RE.match(article_key)
+    if dup:
+        base, occ = dup.group(1), int(dup.group(2)) + 1
+        return f"{_display_plain(base)}({occ})"
+    suppl = _SUPPL_RE.match(article_key)
+    if suppl:
+        inner = suppl.group(1)
+        if not inner or inner == "0":
+            return "附則"
+        return f"附則 {_display_plain(inner)}"
+    pseudo = _PSEUDO_RE.match(article_key)
+    if pseudo:
+        return f"({pseudo.group(1)})"
+    return _display_plain(article_key)
 
 
 def clean_text(s: str) -> str:

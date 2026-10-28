@@ -1,7 +1,7 @@
 import pytest
 
 from jplegal.retrieval.pipeline import RetrievedArticle
-from jplegal.retrieval.relevance import judge_articles
+from jplegal.retrieval.relevance import judge_articles, truncate_for_noul
 
 
 class FakeJev:
@@ -51,3 +51,27 @@ async def test_relevance_without_jev_keeps_every_article():
     judged = await judge_articles("残業は？", items, None)
     assert judged[0].relevant is True
     assert judged[0].noul is None
+
+
+def test_truncate_keeps_short_article_intact():
+    assert truncate_for_noul("労働時間") == "労働時間"
+
+
+@pytest.mark.asyncio
+async def test_noul_payload_keeps_closing_exception():
+    long_text = "前文" + "あ" * 900 + "ただし書：管理監督者には適用しない。"
+    items = [_article("L#41", "労働基準法 第41条", long_text)]
+    jev = FakeJev({"a0": {"type": "noul", "noul": 0.9}})
+    await judge_articles("管理監督者への適用は？", items, jev, min_noul=0.5)
+    sent = jev.calls[0]["questions"]["a0"]["instructions"]["article"]["text"]
+    assert "ただし書：管理監督者には適用しない。" in sent
+
+
+def test_truncate_keeps_closing_exception():
+    # ただし書 / delegation clauses sit at the end; plain [:800] would drop them.
+    body = "前文" + "あ" * 900 + "ただし書：管理監督者には適用しない。"
+    cut = truncate_for_noul(body)
+    assert cut.startswith("前文")
+    assert "ただし書：管理監督者には適用しない。" in cut
+    assert "（中略）" in cut
+    assert len(cut) <= 800 + len("\n（中略）\n")

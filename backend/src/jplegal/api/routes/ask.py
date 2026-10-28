@@ -106,7 +106,7 @@ async def ask(request: Request, body: QueryRequest):
             citations = [{"n": i + 1, "uid": it.uid, "citation": it.citation, "caption": it.caption}
                          for i, it in enumerate(grounded)]
             if not c.llm.enabled:
-                msg = "LLM chưa được cấu hình (LLM_MODEL). Chỉ trả về kết quả truy xuất."
+                msg = "LLMが未設定です（LLM_MODEL）。検索結果のみを返します。"
                 yield {"event": "done", "data": _done(msg, grounded, citations)}
                 return
             if not grounded:

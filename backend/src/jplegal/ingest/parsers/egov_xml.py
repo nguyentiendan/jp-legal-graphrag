@@ -142,11 +142,11 @@ def parse_egov_xml(xml: bytes | str, meta: LawMeta | None = None, *, law_id: str
     if root.tag != "Law":
         found = root.find(".//Law")
         if found is None:
-            raise ValueError("Không tìm thấy phần tử <Law> trong XML")
+            raise ValueError("XML内に<Law>要素が見つかりません")
         root = found
     if meta is None:
         if not law_id:
-            raise ValueError("Cần law_id hoặc meta")
+            raise ValueError("law_idまたはmetaが必要です")
         meta = meta_from_xml(root, law_id, revision_id)
     else:
         xml_meta = meta_from_xml(root, meta.law_id, meta.revision_id)

@@ -36,7 +36,7 @@ async def ingest_parsed_law(c, parsed: ParsedLaw, progress: Progress = _noop, *,
     s = c.settings
     meta = parsed.meta
     if not parsed.articles:
-        raise ValueError(f"Không trích được điều luật nào từ {meta.title or meta.law_id}")
+        raise ValueError(f"{meta.title or meta.law_id}から条文を抽出できませんでした")
 
     await progress(10, f"Chunking {len(parsed.articles)} điều")
     chunks = build_chunks(parsed, s.max_chunk_chars)

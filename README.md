@@ -150,12 +150,12 @@
 ```
 
 0. **意図分類（Jev Choice）**: `greeting` / `rag_query` / `out_of_scope`。挨拶と法令外は固定返信。
-1. **埋め込みと形態素解析**: 質問文に `検索クエリ: ` を付けて埋め込みベクトルを生成し、並行してSudachiで形態素解析してBM25用のsparseベクトルを作ります。
+1. **埋め込みと形態素解析**: 質問文の口語表現を法令用語に展開（例：残業代→割増賃金、クビ→解雇、36協定→時間外労働・休日労働）してから、`検索クエリ: ` を付けて埋め込みベクトルを生成し、並行してSudachiで形態素解析してBM25用のsparseベクトルを作ります。元の質問文は表示・関連度判定・回答生成にそのまま使います。
 2. **第1段階（Qdrantハイブリッド検索）**: denseとbm25の2つのprefetchを1回の `query_points` リクエストで実行し、DBSF（デフォルト）またはRRFで融合して上位の条文を取得します。各条文には Dense / BM25 / Graph のどの経路で見つかったか（出典ラベル）と経路別の順位・スコアが付きます。
 3. **Graph展開（Neo4j）**: 上位5件（seed）から、引用（`REFERS_TO`、双方向）、準用（`APPLIES_MUTATIS_MUTANDIS`）、委任（`DELEGATES_TO`）を1ホップ辿ります。委任先が施行令・施行規則などの法令ノードの場合は、その法令に絞ったdense検索を行います。最終結果（`FINAL_K`）に既に含まれる条文は重複して追加しません。
 4. **融合（Fusion）**: リランクなしの場合は **slots方式**（denseの結果を主とし、グラフ由来の新規条文を最大 `GRAPH_SLOTS` 件まで追加）。リランクありの場合は「第1段階の上位 ∪ グラフ候補」をリランカーに渡します。比較用にRRF方式（`FUSION_MODE=rrf`）も残しています。
 5. **リランク**: Ruri v3リランカーで候補を再順位付けし、最終的に上位 `FINAL_K` 件を根拠条文とします。
-6. **条文関連度（Jev Noul）**: 各条文について「この条文は質問の根拠になるか」を独立に判定。`JEV_RELEVANCE_MIN_NOUL` 未満は生成コンテキストから外します（一覧には残し、スコアを表示）。
+6. **条文関連度（Jev Noul）**: 各条文について「この条文は質問の根拠になるか」を独立に判定。長い条文は先頭＋末尾（ただし書・委任条項が残るよう中略）で800字に収めて送ります。`JEV_RELEVANCE_MIN_NOUL` 未満は生成コンテキストから外します（一覧には残し、スコアを表示）。
 7. **回答生成**: 関連度を満たした条文を `法令名 第◯条（見出し）` 付きでLLMに渡し、出典引用を必須として回答をSSEでストリーミングします。
 8. **出力ガードレール**: 生成後に引用括弧を検索結果と照合し、未引用・根拠外引用を警告、免責文を付与します。
 
@@ -454,7 +454,7 @@ backend/                 Python 3.12（uv）、パッケージ jplegal
     api/                 FastAPIルート（/api/ingest、/api/jobs、/api/laws、/api/search、/api/ask SSE）
     worker/              arqタスク
     ingest/              e-Gov XML / PDF / DOCXパーサー、chunker、引用抽出、リンカー
-    retrieval/           intent（Jev）+ dense/BM25 + graph → 融合 → リランク → relevance（Jev）→ LLM → guardrails
+    retrieval/           クエリ書き換え（口語→法令用語）+ intent（Jev）+ dense/BM25 + graph → 融合 → リランク → relevance（Jev）→ LLM → guardrails
     stores/              Qdrant、Neo4j
     clients/             e-Gov API（レート制限）、model-server、LiteLLM、Jev（TypeSafe）
     db/                  SQLAlchemyモデル（PostgreSQL）
@@ -504,7 +504,7 @@ GitHub ActionsによるCI（プルリクエスト時）、GHCRへのイメージ
 | フェーズ | 内容 |
 |---|---|
 | **P0（完了）** | e-Gov API / 一括XML / アップロードによる取り込み、構造・引用・準用・委任のグラフ、Qdrant dense＋Neo4j展開＋slots／リランク、`/ask` ストリーミング、Next.js画面（質問応答、取り込み、進捗、法令・条文とグラフ表示）、Dockerオンプレミス構成、評価セット20問 |
-| **P1（進行中）** | ✔ multi-hop評価セット（38問）＋グラフ展開の修正　✔ Qdrant内BM25（Sudachi）、DBSF融合　✔ Jev 意図分類（Choice）＋条文関連度（Noul）　✔ 規則ベースの引用ガードレール　☐ 口語→法律用語へのクエリ書き換え（LLM）　☐ 項・号レベルの引用　☐ PDF / DOCXアップロードの安定化 |
+| **P1（進行中）** | ✔ multi-hop評価セット（38問）＋グラフ展開の修正　✔ Qdrant内BM25（Sudachi）、DBSF融合　✔ Jev 意図分類（Choice）＋条文関連度（Noul）　✔ 規則ベースの引用ガードレール　✔ 口語→法令用語のクエリ展開（ルールベース、LLM書き換えは未対応）　☐ 項・号レベルの引用　☐ PDF / DOCXアップロードの安定化 |
 | **P2** | LLM抽出の管理付き導入：定義語（`:Term`、`DEFINES`）、主体、法的概念。グラフのレビュー画面 |
 | **P3** | Leidenコミュニティ＋コミュニティレポートによるグローバル検索 |
 | **P4** | 改正・施行日に基づくバージョン管理、判例・通達、認証、Langfuse、LiteLLM Proxy |

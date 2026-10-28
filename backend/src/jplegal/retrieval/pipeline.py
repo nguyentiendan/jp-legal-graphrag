@@ -21,12 +21,14 @@ import numpy as np
 
 from jplegal.ingest.normalize import display_article
 from jplegal.retrieval.fusion import slot_fusion, weighted_rrf
+from jplegal.retrieval.query_rewrite import expand_query
 
 
 @dataclass
 class RetrievalOptions:
     use_graph: bool = True
     use_rerank: bool = True
+    use_rewrite: bool = True  # expand colloquial terms (残業代→割増賃金) for embed + BM25
     use_sparse: bool | None = None  # None = follow SPARSE_ENABLED
     law_ids: list[str] | None = None
     final_k: int | None = None
@@ -103,7 +105,8 @@ class Retriever:
         s, t = self.s, {}
         t0 = time.perf_counter()
 
-        qv = await self.c.models.embed_query(query)
+        search_query = expand_query(query) if opts.use_rewrite else query
+        qv = await self.c.models.embed_query(search_query)
         qn = np.asarray(qv, dtype=np.float32)
         qn /= np.linalg.norm(qn) + 1e-9
         t["embed"] = (time.perf_counter() - t0) * 1000
@@ -114,7 +117,7 @@ class Retriever:
         stage = opts.first_stage or ("hybrid" if use_sparse else "dense")
         if stage != "dense" and not await self.c.qdrant.has_sparse():
             stage = "dense"  # collection has no sparse vectors yet (reindex-sparse not run)
-        sv = self.c.sparse.encode_query(query) if stage != "dense" else None
+        sv = self.c.sparse.encode_query(search_query) if stage != "dense" else None
         if stage != "dense" and not sv:
             stage = "dense"
         lim = s.dense_top_k * 3

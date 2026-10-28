@@ -24,3 +24,17 @@ def test_article_key(title, key):
 def test_display():
     assert display_article("32_2") == "第32条の2"
     assert display_article("1") == "第1条"
+
+
+def test_display_special_keys():
+    # 本則 (short law whose MainProvision holds only Paragraphs) – see egov_xml.parse_egov_xml
+    assert display_article("main") == "本則"
+    # 附則 articles – see egov_xml prefix f"suppl{si}_"
+    assert display_article("suppl0_1") == "附則 第1条"
+    assert display_article("suppl2_3") == "附則 第3条"
+    assert display_article("suppl0_0") == "附則"
+    # upload pseudo-articles without 条 structure – see text_doc.parse_text_document
+    assert display_article("c1") == "(1)"
+    # duplicate article numbers in uploads (e.g. 附則 restating 第32条)
+    assert display_article("32-1") == "第32条(2)"
+    assert display_article("32_2-1") == "第32条の2(2)"
