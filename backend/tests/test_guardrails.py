@@ -26,9 +26,24 @@ def test_does_not_treat_article_32_of_2_as_article_32():
 
 def test_accepts_paragraph_caption_and_whitespace_variants():
     caption = guard_answer("上限です [労働基準法 第32条（労働時間）]", ["労働基準法 第32条"])
-    paragraph = guard_answer("第1項です [労働基準法  第３２条第1項]", ["労働基準法 第32条"])
+    item = RetrievedArticle(
+        uid="x#32", law_id="x", law_title="労働基準法", article_key="32",
+        title="第三十二条", caption="", path="", text="使用者は、労働者に、休憩時間を除き一週間について四十時間を超えて、労働させてはならない。",
+        para_num=1,
+    )
+    paragraph = guard_answer("第1項です [労働基準法  第３２条第1項]", [item])
     assert caption.unsupported == []
     assert paragraph.unsupported == []
+
+
+def test_rejects_paragraph_not_in_retrieved_chunk():
+    item = RetrievedArticle(
+        uid="x#32", law_id="x", law_title="労働基準法", article_key="32",
+        title="第三十二条", caption="", path="", text="第一項の本文のみ。",
+        para_num=1,
+    )
+    guarded = guard_answer("例外です [労働基準法 第32条第2項]", [item])
+    assert guarded.unsupported == ["労働基準法 第32条第2項"]
 
 
 def test_warns_when_answer_cites_nothing():

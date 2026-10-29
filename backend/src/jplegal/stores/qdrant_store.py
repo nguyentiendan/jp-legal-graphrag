@@ -82,6 +82,14 @@ class QdrantStore:
             wait=True,
         )
 
+    async def mark_law_not_current(self, law_id: str) -> None:
+        await self.client.set_payload(
+            self.collection,
+            payload={"is_current": False},
+            points=models.FilterSelector(filter=_match("law_id", [law_id])),
+            wait=True,
+        )
+
     async def upsert_chunks(self, chunks: list[Chunk], vectors: list[list[float]], extra: dict | None = None,
                             batch: int = 128, sparse: list[SparseVec] | None = None) -> None:
         extra = extra or {}
@@ -107,7 +115,10 @@ class QdrantStore:
                     "caption": c.caption,
                     "path": c.path,
                     "part": c.part,
+                    "para_num": c.para_num,
+                    "proviso": c.proviso,
                     "text": c.text,
+                    "is_current": True,
                     **extra,
                 },
             )
@@ -117,7 +128,7 @@ class QdrantStore:
             await self.client.upsert(self.collection, points=points[i : i + batch], wait=True)
 
     async def search(self, vector: list[float], limit: int, law_ids: list[str] | None = None) -> list[DenseHit]:
-        flt = _match("law_id", law_ids) if law_ids else None
+        flt = _query_filter(law_ids)
         res = await self.client.query_points(
             self.collection, query=vector, using=DENSE, limit=limit, query_filter=flt, with_payload=True,
         )
@@ -126,7 +137,7 @@ class QdrantStore:
     async def search_sparse(self, svec: SparseVec, limit: int, law_ids: list[str] | None = None) -> list[DenseHit]:
         if not svec:
             return []
-        flt = _match("law_id", law_ids) if law_ids else None
+        flt = _query_filter(law_ids)
         res = await self.client.query_points(
             self.collection, query=models.SparseVector(indices=svec.indices, values=svec.values), using=SPARSE,
             limit=limit, query_filter=flt, with_payload=True,
@@ -139,7 +150,7 @@ class QdrantStore:
         """Dense + sparse in 1 request: 2 prefetches → Qdrant fusion (rrf | dbsf)."""
         if not svec:
             return await self.search(vector, limit, law_ids)
-        flt = _match("law_id", law_ids) if law_ids else None
+        flt = _query_filter(law_ids)
         pl = prefetch_limit or limit
         prefetch = [
             models.Prefetch(query=vector, using=DENSE, limit=pl, filter=flt),
@@ -252,3 +263,15 @@ def _hits(points) -> list[DenseHit]:
 
 def _match(field: str, values: list[str]) -> models.Filter:
     return models.Filter(must=[models.FieldCondition(key=field, match=models.MatchAny(any=list(values)))])
+
+
+def _query_filter(law_ids: list[str] | None, current_only: bool = True) -> models.Filter | None:
+    must: list = []
+    if law_ids:
+        must.append(models.FieldCondition(key="law_id", match=models.MatchAny(any=list(law_ids))))
+    if current_only:
+        must.append(models.Filter(should=[
+            models.FieldCondition(key="is_current", match=models.MatchValue(value=True)),
+            models.IsNullCondition(is_null=models.PayloadField(key="is_current")),
+        ]))
+    return models.Filter(must=must) if must else None

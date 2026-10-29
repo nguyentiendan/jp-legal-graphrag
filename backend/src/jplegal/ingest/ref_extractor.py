@@ -39,6 +39,8 @@ _QUOTE_RE = re.compile(r"「[^「」]*」")
 _SUB_REF_RE = re.compile(rf"(?:第{NUM_CLASS}[項号]|ただし書|本文|前段|後段|各号|(?:の{NUM_CLASS}))")
 _CONNECTORS = {"", "から", "及び", "又は", "並びに", "若しくは", "、", "乃至", "まで、", "まで及び", "まで又は"}
 _DELEGATION_RE = re.compile(r"(政令|[一-龥]{0,10}省令|府令|命令)で定める")
+_PARA_AFTER_RE = re.compile(rf"^第(?P<p>{NUM_CLASS})項")
+_ITEM_AFTER_RE = re.compile(rf"^第(?P<i>{NUM_CLASS})号")
 
 
 @dataclass
@@ -176,13 +178,15 @@ class ReferenceExtractor:
         last_law: str | None = None  # cho 同法
         base_title = parent_title(self.title) or self.title
 
-        def add(t: _Target, relation: Relation, span: str) -> None:
+        def add(t: _Target, relation: Relation, span: str, para: int | None = None,
+                item: str | None = None) -> None:
             if t.law_name is None and t.key == art.article_key:
                 return
             k = (t.law_name, t.key, relation)
             if k not in refs:
                 refs[k] = RawReference(src_uid=art.uid, src_law_id=law_id, relation=relation, raw_span=span,
-                                       target_law_name=t.law_name, target_article_key=t.key)
+                                       target_law_name=t.law_name, target_article_key=t.key,
+                                       target_para=para, target_item=item)
 
         for para in art.paragraphs:
             for sentence in split_sentences(para.text):
@@ -231,7 +235,13 @@ class ReferenceExtractor:
                         for k in self._expand_range(prev_target.key, key):
                             add(_Target(None, k), relation, span)
                     else:
-                        add(target, relation, span)
+                        tail = sentence[m.end() :]
+                        pm = _PARA_AFTER_RE.match(tail)
+                        para = kanji_to_int(pm.group("p")) if pm else None
+                        rest = tail[pm.end() :] if pm else tail
+                        im = _ITEM_AFTER_RE.match(rest)
+                        item = im.group("i") if im else None
+                        add(target, relation, span, para=para, item=item)
                     prev_target, prev_end, last_article_target = target, m.end(), target
 
                 # 委任

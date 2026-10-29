@@ -1,0 +1,5 @@
+{"qid": "t01", "question": "宇宙飛行士の残業代の上限は何時間ですか？", "relevant": [], "expect": "unanswerable", "note": "根拠なし。参照条文からは判断できません"}
+{"qid": "t02", "question": "平均賃金はどのように算定しますか？", "relevant": ["322AC0000000049#12"], "expect": "term", "note": "口語ではなく定義語。第12条とは…をいう"}
+{"qid": "t03", "question": "クビになったら解雇は無効になりますか？", "relevant": ["419AC0000000128#16"], "expect": "colloquial", "note": "クビ→解雇"}
+{"qid": "t04", "question": "36協定を結べば何時間でも働かせられますか？", "relevant": ["322AC0000000049#36"], "expect": "colloquial", "note": "36協定→時間外・休日労働"}
+{"qid": "t05", "question": "施行日前の改正は適用されますか？", "relevant": [], "expect": "as_of", "note": "日付依存。現行チャンクだけでは確定できない場合あり"}

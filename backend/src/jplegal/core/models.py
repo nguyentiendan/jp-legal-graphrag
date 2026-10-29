@@ -85,6 +85,8 @@ class Chunk:
     text: str  # chunk content (without prefix)
     embed_text: str  # header + content, used for embedding
     part: int = 0
+    para_num: int = 1  # 項 (1-based)
+    proviso: bool = False  # ただし書 in this paragraph
 
 
 @dataclass
@@ -97,4 +99,6 @@ class RawReference:
     raw_span: str
     target_law_name: str | None = None  # None = same law
     target_article_key: str | None = None  # None = reference to the whole law (e.g. 委任)
-    target_law_suffix: str | None = None  # "施行令" / "施行規則" cho 委任
+    target_law_suffix: str | None = None  # "施行令" / "施行規則"
+    target_para: int | None = None  # 項
+    target_item: str | None = None  # 号 label, e.g. "一"

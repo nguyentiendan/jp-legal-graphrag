@@ -31,7 +31,7 @@ async def get_law(request: Request, law_id: str) -> dict:
     async with c.db.session() as s:
         r = await s.get(LawRecord, law_id)
         if not r:
-            raise HTTPException(404, "law not found")
+            raise HTTPException(404, "法令が見つかりません")
         unresolved = (await s.execute(
             select(LegalRef.target_law_name, func.count()).where(LegalRef.src_law_id == law_id,
                                                                  LegalRef.resolved.is_(False))
@@ -47,7 +47,7 @@ async def article_graph(request: Request, uid: list[str] = Query(...)) -> dict:
     c = request.app.state.c
     details = await c.neo4j.get_articles(uid)
     if not details:
-        raise HTTPException(404, "article not found")
+        raise HTTPException(404, "条文が見つかりません")
     return {"articles": list(details.values()), "graph": await c.neo4j.subgraph(uid)}
 
 

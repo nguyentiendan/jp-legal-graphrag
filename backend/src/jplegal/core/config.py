@@ -73,8 +73,9 @@ class Settings(BaseSettings):
     enable_daily_update: bool = False  # cron to update ingested laws (bulk file_section=3)
 
     # ---- Ingest ----
-    include_suppl_provisions: bool = False  # 附則 – skipped in MVP
+    include_suppl_provisions: bool = False  # 附則 – skipped unless INCLUDE_SUPPL_PROVISIONS=true
     max_chunk_chars: int = 2400
+    keep_revisions: bool = True  # mark old Qdrant points is_current=false instead of deleting
 
     # ---- Retrieval ----
     dense_top_k: int = 20
@@ -83,6 +84,7 @@ class Settings(BaseSettings):
     graph_slots: int = 2  # without rerank: slots reserved for graph-retrieved articles
     fusion_mode: str = "slots"  # "slots" (default) | "rrf"
     delegated_per_law: int = 3
+    graph_max_in_degree: int = 8  # drop incoming REFERS_TO into hub articles
     rrf_k: int = 60
     w_dense: float = 1.0
     w_graph: float = 0.5

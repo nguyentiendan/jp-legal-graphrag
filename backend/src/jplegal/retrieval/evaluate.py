@@ -3,6 +3,7 @@
 queries.jsonl: {"qid": "...", "question": "...", "relevant": ["322AC0000000049#32", ...]}
     eval/queries.jsonl           – 20 single-article questions
     eval/queries_multihop.jsonl  – 38 questions needing 2–3 articles (law + delegated 施行規則/政令, cited articles)
+    eval/queries_traps.jsonl     – unanswerable / as-of / colloquial / 定義語 traps (small; not for hyperparam)
 All@10 = share of questions where *all* needed articles are in the top 10.
 """
 

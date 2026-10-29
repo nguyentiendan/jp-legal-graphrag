@@ -60,24 +60,28 @@ def _display_plain(key: str) -> str:
     return f"第{head}条" + "".join(f"の{r}" for r in rest)
 
 
-def display_article(article_key: str) -> str:
-    """'32_2' -> '第32条の2' (for display / citation)."""
+def display_article(article_key: str, para_num: int | None = None, proviso: bool = False) -> str:
+    """'32_2' -> '第32条の2'; para_num=1 -> '第32条の2第1項'."""
     if article_key == "main":
-        return "本則"
-    dup = _DUP_SUFFIX_RE.match(article_key)
-    if dup:
-        base, occ = dup.group(1), int(dup.group(2)) + 1
-        return f"{_display_plain(base)}({occ})"
-    suppl = _SUPPL_RE.match(article_key)
-    if suppl:
-        inner = suppl.group(1)
-        if not inner or inner == "0":
-            return "附則"
-        return f"附則 {_display_plain(inner)}"
-    pseudo = _PSEUDO_RE.match(article_key)
-    if pseudo:
-        return f"({pseudo.group(1)})"
-    return _display_plain(article_key)
+        base = "本則"
+    else:
+        dup = _DUP_SUFFIX_RE.match(article_key)
+        if dup:
+            occ = int(dup.group(2)) + 1
+            base = f"{_display_plain(dup.group(1))}({occ})"
+        else:
+            suppl = _SUPPL_RE.match(article_key)
+            if suppl:
+                inner = suppl.group(1)
+                base = "附則" if not inner or inner == "0" else f"附則 {_display_plain(inner)}"
+            else:
+                pseudo = _PSEUDO_RE.match(article_key)
+                base = f"({pseudo.group(1)})" if pseudo else _display_plain(article_key)
+    if para_num:
+        base += f"第{para_num}項"
+    if proviso:
+        base += "ただし書"
+    return base
 
 
 def clean_text(s: str) -> str:

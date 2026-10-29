@@ -27,12 +27,12 @@ async def upload(request: Request, file: UploadFile = File(...), title: str | No
     c = request.app.state.c
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED:
-        raise HTTPException(400, f"Định dạng không hỗ trợ: {suffix}. Cho phép: {sorted(ALLOWED)}")
+        raise HTTPException(400, f"未対応の形式です: {suffix}。許可: {sorted(ALLOWED)}")
     data = await file.read()
     if len(data) > c.settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, f"File vượt quá {c.settings.max_upload_mb}MB")
+        raise HTTPException(413, f"ファイルが {c.settings.max_upload_mb}MB を超えています")
     if not data:
-        raise HTTPException(400, "File rỗng")
+        raise HTTPException(400, "空のファイルです")
     digest = sha256_bytes(data)
     if not force and (dup := await find_duplicate(c, digest)):
         return {"duplicate": True, "document_id": dup.id, "law_id": dup.law_id, "job_id": None}
@@ -70,7 +70,7 @@ async def ingest_egov(request: Request, body: EgovRequest) -> dict:
             unresolved.append(t)
     law_ids = list(dict.fromkeys(law_ids))
     if not law_ids:
-        raise HTTPException(400, f"Không xác định được luật nào. Không tìm thấy: {unresolved}")
+        raise HTTPException(400, f"法令を特定できませんでした。見つからない名称: {unresolved}")
     job = await create_job(c, "egov_law", {"law_ids": law_ids})
     await enqueue(request.app.state.pool, "task_ingest_egov", job.id)
     return {"job_id": job.id, "law_ids": law_ids, "unresolved_titles": unresolved}
@@ -91,7 +91,7 @@ async def ingest_bulk(request: Request, body: BulkRequest) -> dict:
     if body.zip_path:
         p = Path(body.zip_path).resolve()
         if not str(p).startswith(str(c.settings.data_dir.resolve())) or not p.exists():
-            raise HTTPException(400, "zip_path phải nằm trong DATA_DIR và tồn tại")
+            raise HTTPException(400, "zip_path は DATA_DIR 内に存在している必要があります")
     job = await create_job(c, "egov_bulk", body.model_dump())
     await enqueue(request.app.state.pool, "task_ingest_bulk", job.id)
     return {"job_id": job.id}

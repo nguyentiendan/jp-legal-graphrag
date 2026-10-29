@@ -23,7 +23,7 @@ async def get_pool(url: str) -> ArqRedis:
 
 async def create_job(c, kind: str, params: dict, document_id: str | None = None) -> IngestJob:
     async with c.db.session() as s:
-        job = IngestJob(kind=kind, params=params, document_id=document_id, status="queued", message="Đang chờ")
+        job = IngestJob(kind=kind, params=params, document_id=document_id, status="queued", message="待機")
         s.add(job)
         await s.commit()
         await s.refresh(job)

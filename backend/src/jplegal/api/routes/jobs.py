@@ -34,6 +34,6 @@ async def get_job(request: Request, job_id: str) -> dict:
     async with c.db.session() as s:
         j = await s.get(IngestJob, job_id)
         if not j:
-            raise HTTPException(404, "job not found")
+            raise HTTPException(404, "ジョブが見つかりません")
         d = await s.get(Document, j.document_id) if j.document_id else None
     return _job(j, d)

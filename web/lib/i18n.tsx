@@ -87,16 +87,17 @@ const dict = {
 export type Key = keyof typeof dict;
 
 const Ctx = createContext<{ lang: Lang; setLang: (l: Lang) => void; t: (k: Key) => string }>({
-  lang: "vi",
+  lang: "ja",
   setLang: () => {},
-  t: (k) => dict[k].vi,
+  t: (k) => dict[k].ja,
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>("vi");
+  const [lang, setLangState] = useState<Lang>("ja");
   useEffect(() => {
     const saved = localStorage.getItem("lang");
     if (saved === "vi" || saved === "ja") setLangState(saved);
+    else document.documentElement.lang = "ja";
   }, []);
   const setLang = (l: Lang) => {
     setLangState(l);

@@ -23,6 +23,7 @@ def test_article_key(title, key):
 
 def test_display():
     assert display_article("32_2") == "第32条の2"
+    assert display_article("32", para_num=1, proviso=True) == "第32条第1項ただし書"
     assert display_article("1") == "第1条"
 
 

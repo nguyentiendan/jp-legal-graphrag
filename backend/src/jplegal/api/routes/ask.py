@@ -45,7 +45,7 @@ def _jev(c):
 
 
 def _done(answer: str, items: list[RetrievedArticle], citations: list[dict]) -> str:
-    guarded = guard_answer(answer, [it.citation for it in items])
+    guarded = guard_answer(answer, items)
     return json.dumps(
         {
             "answer": guarded.answer,

@@ -40,7 +40,7 @@ def init() -> None:
     async def main():
         c = await _container()
         await c.close()
-        typer.echo("OK – schema đã sẵn sàng")
+        typer.echo("OK – スキーマを準備しました")
 
     _run(main())
 
@@ -58,7 +58,7 @@ def ingest_egov(law_id: list[str] = typer.Option(None, "--law-id"),
     if file:
         ids += _load_laws_file(file)
     if not ids:
-        raise typer.BadParameter("Cần --law-id hoặc --file")
+        raise typer.BadParameter("--law-id または --file が必要です")
 
     async def main():
         from jplegal.worker.jobs import create_job, enqueue, get_pool
@@ -67,7 +67,7 @@ def ingest_egov(law_id: list[str] = typer.Option(None, "--law-id"),
         pool = await get_pool(c.settings.redis_url)
         job = await create_job(c, "egov_law", {"law_ids": list(dict.fromkeys(ids))})
         await enqueue(pool, "task_ingest_egov", job.id)
-        typer.echo(f"job_id={job.id} ({len(ids)} luật)")
+        typer.echo(f"job_id={job.id}（{len(ids)}法令）")
         await pool.aclose()
         await c.close()
 
@@ -197,7 +197,7 @@ def eval_cmd(queries: Path = typer.Option(Path("/app/eval/queries.jsonl")), out:
             typer.echo(text)
             return
         metrics = ["recall@1", "recall@5", "recall@10", "mrr@10", "ndcg@10", "all@10"]
-        typer.echo(f"{queries.name} ({report['n_queries']} câu)")
+        typer.echo(f"{queries.name}（{report['n_queries']}問）")
         typer.echo(f"{'config':28s}" + "".join(f"{m:>10s}" for m in metrics))
         for name, m in report["configs"].items():
             typer.echo(f"{name:28s}" + "".join(f"{m[k]:>10.3f}" for k in metrics))

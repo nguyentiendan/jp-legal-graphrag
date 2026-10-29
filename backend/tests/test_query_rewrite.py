@@ -4,7 +4,7 @@ import pytest
 
 from jplegal.core.config import Settings
 from jplegal.retrieval.pipeline import RetrievalOptions, Retriever
-from jplegal.retrieval.query_rewrite import expand_query
+from jplegal.retrieval.query_rewrite import expand_query, rewrite_for_search
 
 
 def test_expands_overtime_pay_to_statutory_term():
@@ -67,11 +67,17 @@ class _StubQdrant:
 
 
 class _StubNeo4j:
-    async def expand(self, seeds, limit=500):
+    async def expand(self, seeds, limit=500, max_in_degree=8):
         return []
 
     async def get_articles(self, uids):
         return {}
+
+    async def child_law_ids(self, parent_ids):
+        return []
+
+    async def articles_for_terms(self, query):
+        return []
 
 
 class _StubContainer:
@@ -91,6 +97,18 @@ async def test_pipeline_embeds_expanded_query_but_reports_original():
     assert res.query == "残業代は何パーセントですか？"
     assert len(c.models.embedded) == 1
     assert "割増賃金" in c.models.embedded[0]
+
+
+@pytest.mark.asyncio
+async def test_rewrite_for_search_appends_llm_terms():
+    class _LLM:
+        enabled = True
+
+        async def complete(self, messages):
+            return "時間外労働 割増賃金"
+
+    out = await rewrite_for_search("残業代は？", _LLM())
+    assert "残業代" in out and "割増賃金" in out and "時間外労働" in out
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@
 (:Law)-[:HAS_ARTICLE]->(:Article)      (:Article)-[:NEXT]->(:Article)
 (:Article)-[:REFERS_TO|APPLIES_MUTATIS_MUTANDIS]->(:Article)
 (:Article)-[:DELEGATES_TO]->(:Law)       (:Law)-[:DELEGATES_TO]->(:Law)   (法律 → 施行令/施行規則)
+(:Article)-[:DEFINES]->(:Term)           (:Term)-[:DEFINED_IN]->(:Article)
 """
 
 from __future__ import annotations
@@ -18,6 +19,15 @@ from jplegal.core.models import LawMeta, ParsedLaw, Relation
 REF_RELS = "REFERS_TO|APPLIES_MUTATIS_MUTANDIS|DELEGATES_TO"
 
 
+def keep_incoming(rel: str, outgoing: bool, in_degree: int, max_in: int) -> bool:
+    """Drop incoming REFERS_TO into hub articles (定義条 etc.)."""
+    if outgoing:
+        return True
+    if rel == "REFERS_TO" and in_degree > max_in:
+        return False
+    return True
+
+
 @dataclass
 class GraphEdge:
     src: str
@@ -25,6 +35,8 @@ class GraphEdge:
     dst: str
     outgoing: bool  # True: src -> dst
     dst_kind: str  # Article | Law
+    raw_span: str = ""
+    in_degree: int = 0
 
 
 class Neo4jStore:
@@ -44,6 +56,7 @@ class Neo4jStore:
         for q in (
             "CREATE CONSTRAINT law_id IF NOT EXISTS FOR (l:Law) REQUIRE l.law_id IS UNIQUE",
             "CREATE CONSTRAINT article_uid IF NOT EXISTS FOR (a:Article) REQUIRE a.uid IS UNIQUE",
+            "CREATE CONSTRAINT term_name IF NOT EXISTS FOR (t:Term) REQUIRE t.name IS UNIQUE",
             "CREATE INDEX article_law IF NOT EXISTS FOR (a:Article) ON (a.law_id)",
             "CREATE INDEX law_title IF NOT EXISTS FOR (l:Law) ON (l.title)",
         ):
@@ -143,7 +156,49 @@ class Neo4jStore:
         await self._run("MATCH (l:Law {law_id:$law_id}) DETACH DELETE l", law_id=law_id)
 
     # ------------------------------------------------------------------ read
-    async def expand(self, seeds: list[str], limit: int = 500) -> list[GraphEdge]:
+    async def upsert_terms(self, rows: list[dict]) -> None:
+        """rows: {name, uid, body}."""
+        if not rows:
+            return
+        await self._run(
+            """
+            UNWIND $rows AS r
+            MATCH (a:Article {uid:r.uid})
+            MERGE (t:Term {name:r.name})
+            SET t.body = r.body
+            MERGE (a)-[:DEFINES]->(t)
+            MERGE (t)-[:DEFINED_IN]->(a)
+            """,
+            rows=rows,
+        )
+
+    async def articles_for_terms(self, query: str) -> list[str]:
+        if not query.strip():
+            return []
+        rows = await self._run(
+            """
+            MATCH (t:Term)-[:DEFINED_IN]->(a:Article)
+            WHERE $q CONTAINS t.name
+            RETURN DISTINCT a.uid AS uid
+            """,
+            q=query,
+        )
+        return [r["uid"] for r in rows]
+
+    async def child_law_ids(self, parent_ids: list[str]) -> list[str]:
+        if not parent_ids:
+            return []
+        rows = await self._run(
+            """
+            MATCH (p:Law)-[:DELEGATES_TO]->(c:Law)
+            WHERE p.law_id IN $ids
+            RETURN DISTINCT c.law_id AS id
+            """,
+            ids=parent_ids,
+        )
+        return [r["id"] for r in rows]
+
+    async def expand(self, seeds: list[str], limit: int = 500, max_in_degree: int = 8) -> list[GraphEdge]:
         if not seeds:
             return []
         rows = await self._run(
@@ -151,15 +206,26 @@ class Neo4jStore:
             MATCH (a:Article) WHERE a.uid IN $seeds
             MATCH (a)-[r:{REF_RELS}]-(b)
             WHERE b:Article OR b:Law
-            RETURN a.uid AS src, type(r) AS rel, startNode(r) = a AS outgoing,
+            WITH a, r, b, startNode(r) = a AS outgoing
+            WITH a, r, b, outgoing,
+                 CASE WHEN NOT outgoing AND type(r) = 'REFERS_TO' AND b:Article
+                      THEN COUNT {{ (x)-[:REFERS_TO]->(b) }}
+                      ELSE 0 END AS indeg
+            WHERE outgoing OR type(r) <> 'REFERS_TO' OR indeg <= $max_in
+            RETURN a.uid AS src, type(r) AS rel, outgoing,
                    CASE WHEN b:Article THEN 'Article' ELSE 'Law' END AS kind,
-                   coalesce(b.uid, b.law_id) AS dst
+                   coalesce(b.uid, b.law_id) AS dst,
+                   coalesce(r.raw_span, '') AS raw,
+                   indeg
             LIMIT $limit
             """,
-            seeds=seeds, limit=limit,
+            seeds=seeds, limit=limit, max_in=max_in_degree,
         )
-        return [GraphEdge(src=r["src"], rel=r["rel"], dst=r["dst"], outgoing=r["outgoing"], dst_kind=r["kind"])
-                for r in rows]
+        return [
+            GraphEdge(src=r["src"], rel=r["rel"], dst=r["dst"], outgoing=r["outgoing"],
+                      dst_kind=r["kind"], raw_span=r.get("raw") or "", in_degree=int(r.get("indeg") or 0))
+            for r in rows
+        ]
 
     async def get_articles(self, uids: list[str]) -> dict[str, dict]:
         if not uids:

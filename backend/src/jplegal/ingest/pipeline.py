@@ -19,6 +19,7 @@ from jplegal.ingest.linker import rebuild_links
 from jplegal.ingest.parsers.egov_xml import ids_from_filename, parse_egov_xml
 from jplegal.ingest.parsers.text_doc import extract_text, parse_text_document
 from jplegal.ingest.ref_extractor import extract_references
+from jplegal.ingest.terms import extract_terms
 
 log = logging.getLogger(__name__)
 Progress = Callable[[int, str], Awaitable[None]]
@@ -38,7 +39,7 @@ async def ingest_parsed_law(c, parsed: ParsedLaw, progress: Progress = _noop, *,
     if not parsed.articles:
         raise ValueError(f"{meta.title or meta.law_id}から条文を抽出できませんでした")
 
-    await progress(10, f"Chunking {len(parsed.articles)} điều")
+    await progress(10, f"{len(parsed.articles)}条を項単位でチャンク化")
     chunks = build_chunks(parsed, s.max_chunk_chars)
 
     await progress(20, f"Embedding {len(chunks)} chunk")
@@ -48,20 +49,26 @@ async def ingest_parsed_law(c, parsed: ParsedLaw, progress: Progress = _noop, *,
         vectors += await c.models.embed([ch.embed_text for ch in chunks[i : i + bs]])
         await progress(20 + int(50 * min(1.0, (i + bs) / len(chunks))), f"Embedding {min(i + bs, len(chunks))}/{len(chunks)}")
 
-    await progress(72, "Ghi Qdrant")
-    await c.qdrant.delete_law(meta.law_id)
+    await progress(72, "Qdrantへ書き込み")
+    if s.keep_revisions:
+        await c.qdrant.mark_law_not_current(meta.law_id)
+    else:
+        await c.qdrant.delete_law(meta.law_id)
     sparse = None
     if await c.qdrant.has_sparse():  # always compute BM25 when the collection supports it (sparse branch toggled at query time)
         sparse = [c.sparse_doc({"law_title": ch.law_title, "article_title": ch.article_title,
                                 "caption": ch.caption, "text": ch.text}) for ch in chunks]
     await c.qdrant.upsert_chunks(chunks, vectors, extra={"law_type": meta.law_type, "source": meta.source,
-                                                          "revision_id": meta.revision_id}, sparse=sparse)
+                                                          "revision_id": meta.revision_id,
+                                                          "enforcement_date": meta.enforcement_date or meta.promulgation_date},
+                                 sparse=sparse)
 
-    await progress(80, "Ghi Neo4j")
+    await progress(80, "Neo4jへ書き込み")
     aliases, refs = extract_references(parsed)
     await c.neo4j.upsert_law_graph(parsed)
+    await c.neo4j.upsert_terms(extract_terms(parsed))
 
-    await progress(88, f"Lưu {len(refs)} dẫn chiếu")
+    await progress(88, f"{len(refs)}件の引用を保存")
     async with c.db.session() as db:
         rec = await db.get(LawRecord, meta.law_id) or LawRecord(law_id=meta.law_id)
         rec.title, rec.abbrev, rec.law_num, rec.law_type = meta.title, meta.abbrev, meta.law_num, meta.law_type
@@ -81,9 +88,9 @@ async def ingest_parsed_law(c, parsed: ParsedLaw, progress: Progress = _noop, *,
 
     link_stats = {}
     if link:
-        await progress(94, "Liên kết graph")
+        await progress(94, "グラフを接続")
         link_stats = await rebuild_links(c, {meta.law_id})
-    await progress(100, "Hoàn tất")
+    await progress(100, "完了")
     return {"law_id": meta.law_id, "title": meta.title, "articles": len(parsed.articles), "chunks": len(chunks),
             "refs": len(refs), **link_stats}
 

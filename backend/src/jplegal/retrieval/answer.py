@@ -10,9 +10,11 @@ DEFAULT_SYSTEM = """あなたは日本の法令に詳しいリサーチアシス
 以下の「参照条文」だけを根拠に、質問に日本語で回答してください。
 
 ルール:
-- 根拠とした条文は、文末に [法令名 第◯条] の形式で必ず引用する（例: [労働基準法 第32条]）。
+- 根拠とした条文は、文末に [法令名 第◯条第◯項] の形式で必ず引用する（例: [労働基準法 第32条第1項]）。項が不明なときだけ条までとする。
 - 参照条文に根拠がない事項は推測せず、「参照条文からは判断できません」と明記する。
-- 条件・例外（ただし書、準用、委任先の政令・省令）があれば明示する。
+- 条件・例外（ただし書、準用、委任先の政令・省令）があれば明示する。準用がある場合は読み替え条件も書く。
+- 施行日・改正IDが参照条文に付いている場合は回答末尾に改正施行日を書く。
+- 出典として e-Gov法令検索 と公共データ利用規約（PDL1.0）に言及する。
 - 最後に「※本回答は法的助言ではありません。」と付記する。
 """
 
@@ -28,7 +30,14 @@ def build_context(items: list[RetrievedArticle], max_chars: int = 12000) -> str:
     parts: list[str] = []
     used = 0
     for n, it in enumerate(items, start=1):
-        block = f"[{n}] {it.citation}{it.caption}\n{it.text}".strip()
+        meta = []
+        if it.revision_id:
+            meta.append(f"改正ID:{it.revision_id}")
+        if it.enforcement_date:
+            meta.append(f"施行日:{it.enforcement_date}")
+        extra = f"（{' / '.join(meta)}）" if meta else ""
+        junyo = ("\n（準用原文）" + " / ".join(it.junyo_spans)) if it.junyo_spans else ""
+        block = f"[{n}] {it.citation}{it.caption}{extra}\n{it.text}{junyo}".strip()
         if used + len(block) > max_chars:
             block = block[: max(0, max_chars - used)]
         parts.append(block)

@@ -6,6 +6,8 @@ from jplegal.ingest.linker import LawRegistry
 from jplegal.ingest.parsers.egov_xml import ids_from_filename, parse_egov_xml
 from jplegal.ingest.parsers.text_doc import parse_text_document
 from jplegal.ingest.ref_extractor import ReferenceExtractor, extract_aliases, extract_references, parent_title
+from jplegal.ingest.terms import extract_terms
+from jplegal.stores.neo4j_store import keep_incoming
 
 FIX = Path(__file__).parent / "fixtures" / "419AC0000000128_roudoukeiyaku.xml"
 
@@ -108,6 +110,7 @@ def test_chunker_split_long():
     assert len(chunks) >= 3
     assert all(c.article_uid == "L1#1" for c in chunks)
     assert chunks[0].embed_text.startswith("テスト法 第1条")
+    assert chunks[0].para_num == 1
 
 
 def test_text_document():
@@ -116,6 +119,35 @@ def test_text_document():
     assert [a.article_key for a in pl.articles] == ["1", "2"]
     a1 = pl.articles[0]
     assert a1.caption == "（目的）" and len(a1.paragraphs) == 2 and a1.path == ["第一章　総則"]
+
+
+def test_chunker_keeps_paragraphs_separate():
+    pl = _law("テスト法", [("1", "第一項の本文。")])
+    pl.articles[0].paragraphs.append(Paragraph(2, "２", "第二項ただし書。"))
+    chunks = build_chunks(pl)
+    assert [c.para_num for c in chunks] == [1, 2]
+    assert chunks[1].proviso
+
+
+def test_extracts_paragraph_from_reference():
+    pl = _law("テスト法", [("1", "第十二条第一項の規定による。")])
+    refs = ReferenceExtractor(pl).extract_all()
+    r = next(x for x in refs if x.target_article_key == "12")
+    assert r.target_para == 1
+
+
+def test_term_pattern_heikin_chingin():
+    pl = _law("労働基準法", [("12", "この法律で「平均賃金」とは、これを算定すべき事由の発生した日以前三箇月間に支払われた賃金の総額をいう。")])
+    terms = extract_terms(pl)
+    assert terms and terms[0]["name"] == "平均賃金"
+    assert terms[0]["article_key"] == "12"
+
+
+def test_drop_incoming_refers_to_hubs():
+    assert keep_incoming("REFERS_TO", True, 99, 8)
+    assert keep_incoming("REFERS_TO", False, 3, 8)
+    assert not keep_incoming("REFERS_TO", False, 20, 8)
+    assert keep_incoming("APPLIES_MUTATIS_MUTANDIS", False, 20, 8)
 
 
 def test_ids_from_filename():

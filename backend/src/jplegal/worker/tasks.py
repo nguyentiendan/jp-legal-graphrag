@@ -35,7 +35,7 @@ async def shutdown(ctx: dict) -> None:
 
 async def _run(ctx: dict, job_id: str, fn) -> dict:
     c: Container = ctx["c"]
-    await set_job(c, job_id, status="running", started_at=now(), progress=0, message="Bắt đầu")
+    await set_job(c, job_id, status="running", started_at=now(), progress=0, message="開始")
 
     async def progress(pct: int, msg: str) -> None:
         await set_job(c, job_id, progress=max(0, min(100, pct)), message=msg)
@@ -45,7 +45,7 @@ async def _run(ctx: dict, job_id: str, fn) -> dict:
             job = await s.get(IngestJob, job_id)
         result = await fn(c, job, progress)
         await set_job(c, job_id, status="succeeded", progress=100, finished_at=now(), result=result,
-                      message="Hoàn tất")
+                      message="完了")
         return result
     except Exception as e:
         log.exception("job %s failed", job_id)
@@ -98,7 +98,7 @@ async def task_ingest_egov(ctx: dict, job_id: str) -> dict:
                 await progress(_b + int(_s * p / 100), f"[{_lid}] {m}")
 
             try:
-                await sub(1, "Tải từ e-Gov 法令API")
+                await sub(1, "e-Gov法令APIから取得")
                 law = await c.egov.get_law(lid, cache_dir=c.settings.raw_dir)
                 parsed = parse_egov_xml(law.xml, law.meta, include_suppl=c.settings.include_suppl_provisions)
                 done.append(await ingest_parsed_law(c, parsed, sub))
@@ -106,7 +106,7 @@ async def task_ingest_egov(ctx: dict, job_id: str) -> dict:
                 log.exception("ingest %s failed", lid)
                 failed.append({"law_id": lid, "error": str(e)[:300]})
         if failed and not done:
-            raise RuntimeError(f"Tất cả đều lỗi: {failed}")
+            raise RuntimeError(f"すべて失敗しました: {failed}")
         return {"done": done, "failed": failed}
 
     return await _run(ctx, job_id, fn)
@@ -122,7 +122,7 @@ async def task_ingest_bulk(ctx: dict, job_id: str) -> dict:
             name = f"bulk_{p.get('category_cd', 'all')}_{p.get('update_date', date.today().isoformat())}.zip"
             zip_path = c.settings.raw_dir / "bulk" / name
             if not zip_path.exists():
-                await progress(1, "Tải XML一括ダウンロード")
+                await progress(1, "XML一括ダウンロードを取得")
                 await c.egov.download_bulk(zip_path, category_cd=p.get("category_cd"),
                                            update_date=p.get("update_date"))
         law_ids = set(p.get("law_ids") or []) or None
@@ -144,7 +144,7 @@ async def task_ingest_bulk(ctx: dict, job_id: str) -> dict:
             except Exception as ex:
                 log.exception("bulk ingest %s failed", e.law_id)
                 failed.append({"law_id": e.law_id, "error": str(ex)[:300]})
-        await progress(92, "Liên kết graph")
+        await progress(92, "グラフを接続")
         links = await rebuild_links(c, None)
         return {"done": len(done), "failed": failed, "links": links}
 
@@ -153,7 +153,7 @@ async def task_ingest_bulk(ctx: dict, job_id: str) -> dict:
 
 async def task_rebuild_links(ctx: dict, job_id: str) -> dict:
     async def fn(c: Container, job: IngestJob, progress):
-        await progress(10, "Resolve dẫn chiếu")
+        await progress(10, "引用を解決")
         return await rebuild_links(c, None)
 
     return await _run(ctx, job_id, fn)
